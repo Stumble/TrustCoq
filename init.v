@@ -10,7 +10,7 @@ Import ListNotations.
 
 Definition Name := list string.
 
-Definition Data := (Name, Name).
+Definition Data := prod Name Name.
 
 Inductive RuleName : Type :=
 | ruleName : string -> RuleName.
@@ -148,6 +148,9 @@ Proof.
   simpl. reflexivity.
 Qed.
 
+Definition Network := list Data.
+
+(* Fixpoint execution (prog:program) (input:map) : bool := *)
 
 (* isMatch examples *)
 
