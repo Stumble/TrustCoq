@@ -121,6 +121,34 @@ Fixpoint isMatch (nm:Name) (mp:MatchPattern) : bool * (list Name) :=
               end
   end.
 
+Local Open Scope string_scope.
+Example isMatch_test1 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild));
+                                  (mc_exact "c");
+                                  (mc_exact "d")] = (true, [["a";"b"]]).
+Proof.
+  simpl. reflexivity.
+Qed.
+
+Example isMatch_test2 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild))] = (true, [["a";"b";"c";"d"]]).
+Proof.
+  simpl. reflexivity.
+Qed.
+
+Example isMatch_test3 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild));
+                                                     (mc_exact "e")]
+                        = (false, [["a";"b";"c";"d"]]).
+Proof.
+  simpl. reflexivity.
+Qed.
+
+Example isMatch_test4 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild));
+                                                     (mc_exact "c")]
+                        = (false, [["a";"b"]]).
+Proof.
+  simpl. reflexivity.
+Qed.
+
+
 (* isMatch examples *)
 
 (* this kind of definition of regular expression cut off the backtracking part of
@@ -143,12 +171,10 @@ Fixpoint isMatch (nm:Name) (mp:MatchPattern) : bool * (list Name) :=
 
        (* to make at least one parameter shrink, here we have to use network as List Data
           and erase data every time you fetch it.
-        this serves the same function as having a map repreventing dealing with same map*)
+        this serves the same function as having a map to prevent dealing with same data packet*)
   
 
 (* todo *)
-(* nameComponent and MatchComponent : done *)
-(* write isMatch program : done*)
 (* how to use map *)
 (* write execution *)
 
