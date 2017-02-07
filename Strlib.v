@@ -24,3 +24,10 @@ Proof.
   simpl. reflexivity.
 Qed.
  
+Lemma string_eq_ref : forall s1 s2, beq_string s1 s2 = true -> s1 = s2.
+Proof.
+  intros. Admitted.
+
+Lemma string_neq_ref : forall s1 s2, beq_string s1 s2 = false -> s1 <> s2.
+Proof.
+  intros. Admitted.
