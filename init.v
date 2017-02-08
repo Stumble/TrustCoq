@@ -72,7 +72,7 @@ Inductive Action : Type :=
 (* try expr1, if authentication failed, extract try Rule *)
 | actRc            : RuleCall -> Action
 | actOrAnchor      : RuleCall -> RuleCall -> Action
-| actAnchor        : RuleCall -> Action.
+| actAnchor        : string -> Action.
 (* if first pattern match, use first one, if pattern does not match try second anchor call *)
 
 Inductive Expr : Type :=
@@ -102,7 +102,6 @@ Example sampleProgram1 :=
 Print sampleProgram1.
 
 (* Definition tuple  := (true, true, true). *)
-
 
 (* Fixpoint expandPattern (mp:MatchPattern) (rp:RuleParameter) : MatchPattern := *)
 (*   end. *)
@@ -294,34 +293,6 @@ Fixpoint hasLoop (e:Expr) (prog:Program) : bool :=
   | expr (ruleName s) mp act => hasActLoop s act n prog
   end.
 
-Example w1 := ((expr (ruleName "author")
-           []
-           (actRc (ruleCall (ruleName "article") [(rp_prefixOfIndexed 1 1)])
-         )
-                )).
-
-Example prog := sampleProgram1.
-
-Example act1 := (actRc
-         (ruleCall
-         (ruleName
-         "article")
-         [
-         rp_prefixOfIndexed
-         1 1])).
-
-
-Compute hasActLoop "author" act1 2 prog.
-
-Compute     match act1 with
-            | actRc (ruleCall (ruleName rcname) para) => Some (hasPrefix para)
-            | _ => None 
-            end.
-
-Compute (actionOf "article" prog).
-Compute hasActLoop "author" (actionOf "article" prog) 1 prog.
-
-
 Fixpoint checkNoLoopImpl (prog:Program) (progConst:Program) : bool :=
   match prog with
   | [] => true
@@ -385,10 +356,184 @@ Qed.
 (* loop-trust: done *)
 
 
+Fixpoint hasActAnchor (rname:string) (act:Action) (limit:nat) (prog:Program) : bool :=
+  match limit with
+  | 0 => false
+  | S n' =>
+    match act with
+    | actTryElse (ruleCall (ruleName tryRule) _) (ruleCall (ruleName elseRule) _) =>
+      if andb (hasActAnchor tryRule (actionOf tryRule prog) n' prog) (hasActAnchor elseRule (actionOf elseRule prog) n' prog)
+      then true
+      else false
+    | actOrAnchor _ _ => true
+    | actRc (ruleCall (ruleName rcname) para) => (hasActAnchor rcname (actionOf rcname prog) n' prog)
+    | actAnchor _ => true
+   end
+  end.
+
+Fixpoint hasAnchorCheck (e:Expr) (prog:Program) : bool :=
+  let n := List.length prog in
+  match e with
+  | expr (ruleName s) mp act => hasActAnchor s act n prog
+  end.
+
+Fixpoint hasAnchorImpl (prog:Program) (progConst:Program) : bool :=
+  match prog with
+  | [] => true
+  | e::t => if (hasAnchorCheck e progConst)
+            then hasAnchorImpl t progConst
+            else false
+  end.
+
+Definition hasAnchor (prog:Program) := hasAnchorImpl prog prog.
+
+Example hasAnchorTest1 : hasAnchor sampleProgram1 = false.
+Proof.
+  reflexivity.
+Qed.
+
+Example hasAnchorTest2 : hasAnchor sampleProgram2 = false.
+Proof.
+  reflexivity.
+Qed.
+
+Example hasAnchorTest3 : hasAnchor sampleProgram3 = false.
+Proof.
+  reflexivity.
+Qed.
+
+Example sampleProgram4 :=
+  [(expr (ruleName "article")
+         [(mc_indexed (mc_sequence_wild "blog"))]
+         (actRc (ruleCall (ruleName "author") [(rp_indexed 1)])
+         )
+   );
+     (expr (ruleName "author")
+         [(mc_indexed (mc_sequence_wild "blog"))]
+         (actRc (ruleCall (ruleName "admin") [(rp_indexed 1)])
+         )
+   );
+     (expr (ruleName "admin")
+         [(mc_indexed (mc_sequence_wild "blog"))]
+         (actOrAnchor (ruleCall (ruleName "author") [(rp_prefixOfIndexed 1 1)])
+                     (ruleCall (ruleName "root") [])
+         )
+   );
+     (expr (ruleName "root")
+           [(mc_indexed (mc_sequence_wild "blog"))]
+           (actAnchor "/usr/local/key1")
+     )
+].
 
 
-(* recursive dependecy on trust anchor*)
-(* least privilege principle *)
+Example hasAnchorTest4 : hasAnchor sampleProgram4 = true.
+Proof.
+  reflexivity.
+Qed.
+
+(* recursive dependecy on trust anchor: done*)
+
+Fixpoint noSameAnchorBeforeBack (prog:Program) (anchorName:string) (homeName:string) (limit:nat) (act:Action) :=
+  match limit with
+  | 0 => false
+  | S n' =>
+    match act with
+    | actTryElse (ruleCall (ruleName tryRule) _) _ => 
+      if beq_string tryRule homeName then true
+      else (if beq_string tryRule anchorName
+            then false
+            else (noSameAnchorBeforeBack prog anchorName homeName n' (actionOf tryRule prog )))
+    | actAnchor _ => true
+    | actOrAnchor (ruleCall (ruleName nextRule) _) (ruleCall (ruleName anchorRule) _) =>
+      if beq_string anchorRule anchorName
+      then false
+      else (if beq_string homeName nextRule
+            then true
+            else (noSameAnchorBeforeBack prog anchorName homeName n' (actionOf nextRule prog))
+           )
+    | actRc (ruleCall (ruleName nextRule) para) =>
+      (if beq_string homeName nextRule
+       then true
+       else (if beq_string nextRule anchorName
+             then false
+             else (noSameAnchorBeforeBack prog anchorName homeName n' (actionOf nextRule prog ))
+            )
+      )
+    end
+  end.
+         
+
+Fixpoint satisfyLppCheck (e:Expr) (prog:Program) : bool :=
+  let n := List.length prog in
+  match e with
+  | expr (ruleName exprName) mp act =>
+    match act with
+    | actOrAnchor (ruleCall (ruleName nextRule) _) (ruleCall (ruleName anchorRule) _) =>
+      noSameAnchorBeforeBack prog anchorRule exprName n (actionOf nextRule prog) 
+    | _ => true
+    end
+  end.
+
+Fixpoint satisfyLppImpl (prog:Program) (progConst:Program) : bool :=
+  match prog with
+  | [] => true
+  | e::t => if (satisfyLppCheck e progConst)
+            then satisfyLppImpl t progConst
+            else false
+  end.
+
+Definition satisfyLpp (prog:Program) := satisfyLppImpl prog prog.
+
+Example satisfyLppTest1 : satisfyLpp sampleProgram1 = true.
+Proof.
+  reflexivity.
+Qed.
+
+Example satisfyLppTest2 : satisfyLpp sampleProgram2 = true.
+Proof.
+  reflexivity.
+Qed.
+
+Example satisfyLppTest3 : satisfyLpp sampleProgram3 = true.
+Proof.
+  reflexivity.
+Qed.
+
+Example satisfyLppTest4 : satisfyLpp sampleProgram4 = true.
+Proof.
+  reflexivity.
+Qed.
+
+Example sampleProgram5 :=
+  [
+    (expr (ruleName "sub.foo.com")
+         []
+         (actRc (ruleCall (ruleName "foo.com") [(rp_indexed 1)])
+         )
+   );
+     (expr (ruleName "foo.com")
+         []
+         (actRc (ruleCall (ruleName ".com") [(rp_indexed 1)])
+         )
+   );
+     (expr (ruleName "bar.com")
+         []
+         (actOrAnchor (ruleCall (ruleName "foo.com") [(rp_prefixOfIndexed 1 1)])
+                     (ruleCall (ruleName ".com") [])
+         )
+   );
+     (expr (ruleName ".com")
+           []
+           (actAnchor "/usr/local/key1")
+     )
+].
+
+Example satisfyLppTest5 : satisfyLpp sampleProgram5 = false.
+Proof.
+  reflexivity.
+Qed.
+
+(* least privilege principle: done*)
 
 Fixpoint interpreter (n:nat) (prog:Program) (net:Network)
          (data:Data) (st:State): option bool :=
