@@ -5,48 +5,101 @@ Require Import Coq.Strings.String.
 Require Import Coq.Strings.Ascii.
 Require Import Coq.Bool.Bool.
 Require Import Strlib.
+Require Export Setoid.
 
 Import ListNotations.
 
-Definition Name := list string.
+Definition NameComp := string.
 
-Definition Data := prod Name Name.
+Definition Name := list NameComp.
+
+Definition Data := prod (prod Name Name) string.
 
 Inductive RuleName : Type :=
 | ruleName : string -> RuleName.
 
 Inductive MatchComp : Type :=
   | mc_wild : MatchComp
-  | mc_sequence_wild : MatchComp
+  | mc_sequence_wild : string -> MatchComp
   | mc_exact : string -> MatchComp
   | mc_indexed : MatchComp -> MatchComp.
+(* you can't have index inside a index,
+   that's why we can proof that parameter is shrinking *)
 
 Definition MatchPattern := list MatchComp.
 
+Inductive MatchCompMatch : MatchComp -> NameComp -> Prop :=
+| mcm_wild : forall x, MatchCompMatch mc_wild x
+| mcm_exact : forall x,  MatchCompMatch (mc_exact x) x
+| mcm_index : forall x y, MatchCompMatch x y -> MatchCompMatch (mc_indexed x) y
+| mcm_seq : forall x y, x <> y -> MatchCompMatch (mc_sequence_wild x) y
+.
+
+Inductive regMatch : MatchPattern -> Name -> Prop :=
+| Msingle : forall x y, MatchCompMatch x y -> regMatch [x] [y]
+| Mseq : forall n1 n2 s1,
+    regMatch [(mc_sequence_wild s1)] n1 ->
+    regMatch [(mc_sequence_wild s1)] n2 ->
+    regMatch [(mc_sequence_wild s1)] (n1 ++ n2)
+| MApp : forall s1 r1 s2 r2,
+    regMatch r1 s1 ->
+    regMatch r2 s2 ->
+    regMatch (r1 ++ r2) (s1 ++ s2).
+
+Local Open Scope string_scope.
+
+Example mcm1 : MatchCompMatch (mc_indexed (mc_sequence_wild "blog")) "a".
+Proof.
+  apply mcm_index. apply mcm_seq. apply string_neq_ref. reflexivity.
+Qed.
+
+Example regMatch1 : regMatch [(mc_indexed (mc_sequence_wild "blog"));
+                              (mc_exact "blog");
+                              (mc_exact "article")]
+                             ["a";"b";"blog";"article"].
+Proof.
+Admitted.
+
 Inductive RuleParameter : Type :=
   | rp_indexed : nat -> RuleParameter
-  | rp_const : Name -> RuleParameter.
+  | rp_prefixOfIndexed : nat -> nat -> RuleParameter.
+
+Inductive RuleCall : Type :=
+  | ruleCall : RuleName -> list RuleParameter -> RuleCall.  
 
 Inductive Action : Type :=
-  | action : RuleName -> list RuleParameter -> Action.
+| actTryElse       : RuleCall -> RuleCall -> Action  
+(* try expr1, if authentication failed, extract try Rule *)
+| actRc            : RuleCall -> Action
+| actOrAnchor      : RuleCall -> RuleCall -> Action
+| actAnchor        : RuleCall -> Action.
+(* if first pattern match, use first one, if pattern does not match try second anchor call *)
 
 Inductive Expr : Type :=
   | expr : RuleName -> MatchPattern -> Action -> Expr.
 
-Inductive Program : Type :=
-  | program: list Expr -> Program.
+Definition Program := list Expr.
 
 Example sampleRuleName: RuleName := ruleName "test".
 
-Example sampleProgram :=
-  program [(expr (ruleName "article")
-                 [(mc_indexed (mc_sequence_wild));
-                                  (mc_exact "blog");
-                                  (mc_exact "article")]
-                 (action (ruleName "author") [(rp_indexed 1)]))
-          ].
+Example sampleProgram1 :=
+  [(expr (ruleName "article")
+                 [(mc_indexed (mc_sequence_wild "blog"));
+                              (mc_exact "blog");
+                              (mc_exact "article")]
+                 (actRc (ruleCall (ruleName "author") [(rp_indexed 1)])
+                 )
+   );
+     (expr (ruleName "author")
+           [(mc_indexed (mc_sequence_wild "blog"));
+              (mc_exact "blog");
+              (mc_exact "article")]
+           (actRc (ruleCall (ruleName "article") [(rp_prefixOfIndexed 1 1)])
+         )
+   )
+  ].
 
-Print sampleProgram.
+Print sampleProgram1.
 
 (* Definition tuple  := (true, true, true). *)
 
@@ -73,13 +126,13 @@ Compute findFirst "test"%string [  "a"%string;
                                 ].
 Print MatchComp.
 
-Fixpoint getExactContent (mc:MatchComp) : string :=
-  match mc with
-  | mc_wild => ""%string
-  | mc_sequence_wild => ""%string
-  | mc_exact s => s
-  | mc_indexed mc' => getExactContent mc'
-  end.
+(* Fixpoint getExactContent (mc:MatchComp) : string := *)
+(*   match mc with *)
+(*   | mc_wild => ""%string *)
+(*   | mc_sequence_wild => ""%string *)
+(*   | mc_exact s => s *)
+(*   | mc_indexed mc' => getExactContent mc' *)
+(*   end. *)
 
 Compute (hd mc_wild []).
               
@@ -91,9 +144,8 @@ Fixpoint isMatch (nm:Name) (mp:MatchPattern) : bool * (list Name) :=
           end
   | h :: t => match h with
               | mc_wild => isMatch (tl nm) t
-              | mc_sequence_wild => let target := getExactContent (hd mc_wild t) in
-                                    let (part1, rest) := findFirst target nm in
-                                    (isMatch rest t)
+              | mc_sequence_wild s => let (part1, rest) := findFirst s nm in
+                                      (isMatch rest t)
               | mc_exact ss => match nm with
                                | [] => (false, [])
                                | hd_nm :: tl_nm =>
@@ -112,36 +164,34 @@ Fixpoint isMatch (nm:Name) (mp:MatchPattern) : bool * (list Name) :=
                                                                          (isOk, [ss]::indexedList)
                                                                        else (false, [])
                                                    end
-                                  | mc_sequence_wild => let target := getExactContent (hd mc_wild t) in
-                                                        let (indexedName, rest) := findFirst target nm in
-                                                        let (isOk, indexedList) := isMatch rest t in
-                                                        (isOk, indexedName :: indexedList)
+                                  | mc_sequence_wild s => let (indexedName, rest) := findFirst s nm in
+                                                          let (isOk, indexedList) := isMatch rest t in
+                                                          (isOk, indexedName :: indexedList)
                                   | _ => (false, [])
                                   end
               end
   end.
 
-Local Open Scope string_scope.
-Example isMatch_test1 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild));
+Example isMatch_test1 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild "c"));
                                   (mc_exact "c");
                                   (mc_exact "d")] = (true, [["a";"b"]]).
 Proof.
   simpl. reflexivity.
 Qed.
 
-Example isMatch_test2 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild))] = (true, [["a";"b";"c";"d"]]).
+Example isMatch_test2 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild ""))] = (true, [["a";"b";"c";"d"]]).
 Proof.
   simpl. reflexivity.
 Qed.
 
-Example isMatch_test3 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild));
+Example isMatch_test3 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild "e"));
                                                      (mc_exact "e")]
                         = (false, [["a";"b";"c";"d"]]).
 Proof.
   simpl. reflexivity.
 Qed.
 
-Example isMatch_test4 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild));
+Example isMatch_test4 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild "c"));
                                                      (mc_exact "c")]
                         = (false, [["a";"b"]]).
 Proof.
@@ -149,6 +199,244 @@ Proof.
 Qed.
 
 Definition Network := list Data.
+
+Definition empty_name : Name := [""].
+Definition empty_data : Data := ((empty_name, empty_name), "").
+Definition State : Type := prod bool (prod RuleName nat).
+(* bool, if it is firstTime, currentRule, recursive maximum times *)
+
+Print Expr.
+
+(* leave this part for later, right now, if not exist, just return False *)
+(* Fixpoint ruleDefined (nm:string) (prog:Program) := *)
+(*   match prog with *)
+(*   | [] => false *)
+(*   | e::t => let '(expr (ruleName rn) mp act) := e in *)
+(*   end. *)
+
+(* Fixpoint syntaxCheck (prog:Program) : bool := *)
+(*   match prog with *)
+(*   | [] => true *)
+(*   | e::t => let '(expr (ruleName rn) mp act) := e in *)
+(*             if ruleDefined rn prog *)
+(*             then  *)
+(*             else false *)
+(*   end. *)
+
+(*
+syntax check:
+1. ruleCall exist
+2. indexedValue used is no more than indexed in matchPattern
+3. substitution call is no more than indexed in matchPattern
+*)
+
+
+Fixpoint checker (prog:Program) : bool :=
+  match prog with
+  | [] => true
+  | e::t => false
+  end.
+
+(* Inductive Expr : Type := *)
+(*   | expr : RuleName -> MatchPattern -> Action -> Expr. *)
+
+Print Expr.
+
+  (* expr : RuleName -> MatchPattern -> Action -> Expr. *)
+
+
+Fixpoint hasPrefix (para:list RuleParameter) : bool :=
+  match para with
+  | [] => false
+  | p::t => match p with
+            | rp_indexed _ => false
+            | rp_prefixOfIndexed _ _ => true
+            end
+  end.
+
+Example hasPrefixTest1 : hasPrefix [(rp_prefixOfIndexed 1 1)] = true.
+Proof.
+  reflexivity.
+Qed.
+
+Fixpoint actionOf (name:string) (prog:Program) : Action :=
+  match prog with
+  | [] => actRc (ruleCall (ruleName "RuleNotExist") [])
+  | e::t => match e with
+            | expr (ruleName rname) _ act => if beq_string rname name
+                                             then act
+                                             else actionOf name t
+            end
+  end.
+
+
+Fixpoint hasActLoop (rname:string) (act:Action) (limit:nat) (prog:Program) : bool :=
+  match limit with
+  | 0 => false
+  | S n' =>
+    match act with
+    | actTryElse (ruleCall (ruleName rcname) para) _ => (if beq_string rcname rname
+                                                         then true
+                                                         else (hasActLoop rname (actionOf rcname prog) n' prog))
+    | actOrAnchor (ruleCall (ruleName rcname) para) _ => if hasPrefix para then false else
+                                                           (if (beq_string rcname rname) then true
+                                                           else hasActLoop rname (actionOf rcname prog) n' prog)
+    | actRc (ruleCall (ruleName rcname) para) =>  if hasPrefix para then false else
+                                                    (if (beq_string rcname rname) then true
+                                                     else hasActLoop rname (actionOf rcname prog) n' prog)
+    | actAnchor _ => false
+   end
+  end.
+
+Fixpoint hasLoop (e:Expr) (prog:Program) : bool :=
+  let n := List.length prog in
+  match e with
+  | expr (ruleName s) mp act => hasActLoop s act n prog
+  end.
+
+Example w1 := ((expr (ruleName "author")
+           []
+           (actRc (ruleCall (ruleName "article") [(rp_prefixOfIndexed 1 1)])
+         )
+                )).
+
+Example prog := sampleProgram1.
+
+Example act1 := (actRc
+         (ruleCall
+         (ruleName
+         "article")
+         [
+         rp_prefixOfIndexed
+         1 1])).
+
+
+Compute hasActLoop "author" act1 2 prog.
+
+Compute     match act1 with
+            | actRc (ruleCall (ruleName rcname) para) => Some (hasPrefix para)
+            | _ => None 
+            end.
+
+Compute (actionOf "article" prog).
+Compute hasActLoop "author" (actionOf "article" prog) 1 prog.
+
+
+Fixpoint checkNoLoopImpl (prog:Program) (progConst:Program) : bool :=
+  match prog with
+  | [] => true
+  | e::t => if (hasLoop e progConst)
+            then false
+            else checkNoLoopImpl t progConst
+  end.
+
+Definition noLoop (prog:Program) := checkNoLoopImpl prog prog.
+
+Example checkLoopTest1: noLoop sampleProgram1 = true.
+Proof.
+  unfold noLoop. simpl. reflexivity. 
+  Qed.
+
+Example sampleProgram2 :=
+  [(expr (ruleName "article")
+         [(mc_indexed (mc_sequence_wild "blog"));
+                      (mc_exact "blog");
+                      (mc_exact "article")]
+         (actRc (ruleCall (ruleName "author") [(rp_indexed 1)])
+         )
+   );
+     (expr (ruleName "author")
+           [(mc_indexed (mc_sequence_wild "blog"));
+              (mc_exact "blog");
+              (mc_exact "article")]
+           (actRc (ruleCall (ruleName "article") [(rp_indexed 1)])
+         )
+   )
+  ].
+
+Example checkLoopTest2 : noLoop sampleProgram2 = false.
+Proof.
+  reflexivity.
+Qed.
+
+Example sampleProgram3 :=
+  [(expr (ruleName "article")
+         [(mc_indexed (mc_sequence_wild "blog"))]
+         (actRc (ruleCall (ruleName "author") [(rp_indexed 1)])
+         )
+   );
+(expr (ruleName "author")
+         [(mc_indexed (mc_sequence_wild "blog"))]
+         (actRc (ruleCall (ruleName "admin") [(rp_indexed 1)])
+         )
+   );
+(expr (ruleName "admin")
+         [(mc_indexed (mc_sequence_wild "blog"))]
+         (actRc (ruleCall (ruleName "author") [(rp_prefixOfIndexed 1 1)])
+         )
+   )
+].
+
+Example checkLoopTest3 : noLoop sampleProgram3 = true.
+Proof.
+  reflexivity.
+Qed.
+
+(* loop-trust: done *)
+
+
+
+
+(* recursive dependecy on trust anchor*)
+(* least privilege principle *)
+
+Fixpoint interpreter (n:nat) (prog:Program) (net:Network)
+         (data:Data) (st:State): option bool :=
+  match n with
+  | 0 => None
+  | S n' => let '((dataName,keyLocator), content) := data in
+            let '(isFirst, (currentRule, limit)) := st in
+            match isFirst with
+            | true => let '(isFound, (ruleName, indexedArgs)) := findMatchRule prog dataName in
+                      let '(foundMatch, (nextRule, maximum)) := checkAction prog indexedArgs keyLocator in
+                      interpreter n' prog net (getKey net data) (true, (nextRule, 0))
+            | false =>          (* match一下当前数据包和规则，获得indexed表。检查action，如果match上的自己，且limit已经等于0， 则返回失败
+                                   如果limit不等于0， 则递归进入，且pred limit。如果match上别人，则重置limit为无穷，递归进行*)
+                      
+  end.
+  (* 如果rule的结果是trust anchor，则返回成功 *)
+  
+
+Fixpoint beq_name (n1:Name) (n2:Name) : bool :=
+  match n1,n2 with
+  | [],[] => true
+  | h1::t1, h2::t2 => if beq_string h1 h2 then beq_name t1 t2 else false
+  | _, _ => false
+  end.
+
+Definition beq_data (d1:Data) (d2:Data) : bool :=
+  beq_name (fst d1) (fst d2).
+
+
+Fixpoint bin_network (data:Data) (network:Network) : bool :=
+  match network with
+  | [] => false 
+  | h :: t => if (beq_data data h) then bin_network data t else false
+  end.
+
+(* we have to assume that the data from network is formed in a
+   ordered-list that the next one is the one that we want
+*)
+
+(* Fixpoint shrink_network (data:Data) (network:Network) : Network := *)
+(*   match network with *)
+(*   | [] => [] *)
+(*   | h :: t => if (beq_data data h) *)
+(*               then shrink_network data t *)
+(*               else h::(shrink_network data t) *)
+(*   end. *)
+
+
 
 (* Fixpoint execution (prog:program) (input:map) : bool := *)
 
