@@ -23,8 +23,7 @@ Inductive MatchComp : Type :=
   | mc_sequence_wild : string -> MatchComp
   | mc_exact : string -> MatchComp
   | mc_indexed : MatchComp -> MatchComp.
-(* you can't have index inside a index,
-   that's why we can proof that parameter is shrinking *)
+(* you can't have index inside a index *)
 
 Definition MatchPattern := list MatchComp.
 
@@ -69,7 +68,7 @@ Inductive RuleCall : Type :=
 
 Inductive Action : Type :=
 | actTryElse       : RuleCall -> RuleCall -> Action  
-(* try expr1, if authentication failed, extract try Rule *)
+(* try expr1, if authentication failed, unwrap data and try Rule *)
 | actRc            : RuleCall -> Action
 | actOrAnchor      : RuleCall -> RuleCall -> Action
 | actAnchor        : string -> Action.
@@ -236,13 +235,7 @@ Fixpoint checker (prog:Program) : bool :=
   | e::t => false
   end.
 
-(* Inductive Expr : Type := *)
-(*   | expr : RuleName -> MatchPattern -> Action -> Expr. *)
-
 Print Expr.
-
-  (* expr : RuleName -> MatchPattern -> Action -> Expr. *)
-
 
 Fixpoint hasPrefix (para:list RuleParameter) : bool :=
   match para with
@@ -535,22 +528,54 @@ Qed.
 
 (* least privilege principle: done*)
 
-Fixpoint interpreter (n:nat) (prog:Program) (net:Network)
-         (data:Data) (st:State): option bool :=
+
+(* Lemma regEquivlence : forall name p, regMatch p name <-> fst (isMatch name p) = true. *)
+(* Proof. *)
+(* Admitted. *)
+
+(* Lemma interpreterTerminate : forall prog net data, *)
+(*     propertyCheck prog -> exists i, interpreter i prog net data emptyState = Some rst. *)
+(* Proof. *)
+(* Admitted. *)
+
+(* 当匹配时，目前先传n'，到时候再看是不是可以传更科学的数值，例如程序的最大环数？ *)
+Fixpoint interpr_findMatchRule (progConst:Program) (n:nat) (prog:Program) (net:Network)
+         (data:Data) : option bool :=
   match n with
   | 0 => None
-  | S n' => let '((dataName,keyLocator), content) := data in
-            let '(isFirst, (currentRule, limit)) := st in
-            match isFirst with
-            | true => let '(isFound, (ruleName, indexedArgs)) := findMatchRule prog dataName in
-                      let '(foundMatch, (nextRule, maximum)) := checkAction prog indexedArgs keyLocator in
-                      interpreter n' prog net (getKey net data) (true, (nextRule, 0))
-            | false =>          (* match一下当前数据包和规则，获得indexed表。检查action，如果match上的自己，且limit已经等于0， 则返回失败
-                                   如果limit不等于0， 则递归进入，且pred limit。如果match上别人，则重置limit为无穷，递归进行*)
-                      
+  | S n' => match prog with
+            | [] => Some false
+            | expr::t => match isMatch (getDataRule expr) (getName data) with
+                         | false => interpr_findMatchRule progConst n' t net data
+                         | true => interpr_follow progConst n' net data expr []
+                         end
+            end
   end.
-  (* 如果rule的结果是trust anchor，则返回成功 *)
-  
+
+Fixpoint interpr_follow (progConst:Program) (n:nat) (net:Network)
+         (data:Data) (expr:Expr) (args:list RuleParameter) :=
+  match n with
+  | 0 => None
+  | S n' => match isMatch (expandPattern (getDataRule expr) args) (getName data) with
+            | (false, _) => Some keyNotMatch
+            | (true, nxtArgs) =>
+              let keyLocator := (getKeyLocator data) in
+              let act := (getAction rule) in
+              match act with
+              | actTryElse tr el =>
+                match rtn := interpr_follow_next (getKey net data) tr nxtArgs with
+                | Some authFail => interpr_follow_next (getKey net (unwrap data)) el nxtArgs
+                | otherwise => otherwise
+                end
+              | actRc nxtRule => interpre_follow_next (getKey net data) nxtRule nxtArgs
+              | actAnchor addr => Some (finalCheck data addr)
+              | actOrAnchor pRule aRule => match rtn := interpr_follow_next (getKey net data) tr nxtArgs with
+                                           | Some keyNotMatch => interpr_follow_next (getKey net data) aRule nxtArgs
+                                           | otherwise => otherwise
+                                           end
+              end
+            end
+  end.
 
 Fixpoint beq_name (n1:Name) (n2:Name) : bool :=
   match n1,n2 with
