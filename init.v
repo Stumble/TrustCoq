@@ -605,12 +605,12 @@ Fixpoint genArgs (indexed:list Name) (rp: list RuleParameter) : option (list Nam
   match rp with
   | [] => Some []
   | h::t => match h with
-            | rp_indexed n => let nm := (nth n indexed empty_name) in
+            | rp_indexed n => let nm := (nth (pred n) indexed empty_name) in
                               match (genArgs indexed t) with
                               | None => None
                               | Some rtn => Some (nm :: rtn)
                               end
-            | rp_prefixOfIndexed n nPrefix => let nm := (nth n indexed empty_name) in
+            | rp_prefixOfIndexed n nPrefix => let nm := (nth (pred n) indexed empty_name) in
                                               match (getPrefix nm nPrefix) with
                                               | None => None
                                               | Some prefix => match (genArgs indexed t) with
@@ -631,10 +631,15 @@ Fixpoint getExpr (prog:Program) (name:RuleName) : Expr :=
             else getExpr t name
   end.
 
+Example getExprTest1 : getExpr sampleProgram5 (ruleName ".com") = (expr (ruleName ".com") [] (actAnchor "/usr/local/key1")).
+Proof.
+  reflexivity.
+Qed.
+
 Fixpoint getKey (net:Network) (data:Data) :=
   match net with
   | [] => empty_data
-  | h::t => if beq_name (getName h) (getName data)
+  | h::t => if beq_name (getName h) (getKeyLocator data)
             then h
             else getKey t data
   end.
@@ -716,6 +721,76 @@ Fixpoint interpr_findMatchRule (progConst:Program) (n:nat) (prog:Program) (net:N
               end
             end
   end.
+
+Fixpoint interpr_findMatchRule_check (progConst:Program) (n:nat) (prog:Program) (net:Network)
+         (data:Data) : option Expr:=
+  match n with
+  | 0 => None
+  | S n' => match prog with
+            | [] => None
+            | (expr rname mp act)::t =>
+              let '(bMatch, indexed) := isMatch (getName data) mp in
+              match bMatch with
+              | false => interpr_findMatchRule_check progConst n' t net data
+              | true => Some (getExpr progConst rname)
+              end
+            end
+  end.
+
+
+
+Example sampleProgram6 :=
+  [(expr (ruleName "article")
+         [(mc_indexed (mc_sequence_wild "blog"));(mc_exact "blog");(mc_exact "article");(mc_wild)]
+         (actRc (ruleCall (ruleName "author") [(rp_indexed 1)]))
+   );
+     (expr (ruleName "author")
+           [(mc_indexed (mc_sequence_wild "blog"));(mc_exact "blog");(mc_exact "author");(mc_wild)]
+           (actRc (ruleCall (ruleName "admin") [(rp_indexed 1)]))
+     );
+     (expr (ruleName "admin")
+           [(mc_indexed (mc_sequence_wild "blog"));(mc_exact "blog");(mc_exact "admin");(mc_wild)]
+           (actRc (ruleCall (ruleName "root") [(rp_indexed 1)]))
+     );
+     (expr (ruleName "root")
+           [(mc_indexed (mc_sequence_wild "blog"));(mc_exact "blog");(mc_exact "KEY");(mc_wild)]
+           (actAnchor "/usr/local/key1")
+     )
+  ].
+
+Example dataArticle := data ["domain";"test";"blog";"article";"1"] ["domain";"test";"blog";"author";"1"].
+Example dataAuthor := data ["domain";"test";"blog";"author";"1"] ["domain";"test";"blog";"admin";"1"].
+Example dataAdmin:= data ["domain";"test";"blog";"admin";"1"] ["domain";"test";"blog";"KEY";"1"].
+Example dataKey := data ["domain";"test";"blog";"KEY";"1"] [""].
+
+Example blogNet := [dataKey; dataAdmin; dataAuthor; dataArticle].
+
+Compute interpr_findMatchRule sampleProgram6 10 sampleProgram6 blogNet dataArticle.
+
+(* Compute interpr_follow sampleProgram6 9 blogNet dataAdmin (getExpr sampleProgram6 (ruleName "admin")) []. *)
+
+(* Compute isMatch (getName dataKey) [(mc_indexed (mc_sequence_wild "blog"));(mc_exact "blog");(mc_exact "KEY");(mc_wild)]. *)
+
+(* Compute let '(expr rname mp act) := (getExpr sampleProgram6 (ruleName "admin")) in *)
+(* match isMatch (getName dataAdmin) mp with *)
+(* | (false, _) => None *)
+(* | (true, indexed) =>  *)
+(*   match (argTest indexed []) with *)
+(*   | false => None *)
+(*   | true => match act with *)
+(*             | actRc (ruleCall nxtRn nxtPl) => match (genArgs indexed nxtPl) with *)
+(*                                               | None => None *)
+(*                                               | Some nxtArgs =>  *)
+(*                                                 Some (getKey blogNet dataAdmin) *)
+(*                                                 (* interpr_follow_next (getKey net data) (getExpr progConst nxtRn) nxtArgs *) *)
+(*                                               end *)
+(*             | _ => None *)
+(*             end *)
+(*   end *)
+(* end. *)
+
+              
+
 
 Definition beq_data (d1:Data) (d2:Data) : bool :=
   beq_name (fst d1) (fst d2).
