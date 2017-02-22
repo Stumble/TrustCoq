@@ -574,6 +574,8 @@ Inductive Rtn : Type :=
 | unwrapFailed : Rtn
 | debug1 : Rtn
 | debug2 : Rtn
+| rtnDebugExpr : Expr -> Rtn
+| rtnDebugAny :  forall X, X -> Rtn
 .
 
 Definition getKeyLocator (data:Data) : Name :=
@@ -723,11 +725,12 @@ Fixpoint interpr_follow (progConst:Program) (n:nat) (net:Network)
                 let '(ruleCall elRn elPl) := el in
                 match (genArgs indexed trPl) with
                 | None => Some noMorePrefix
-                | Some trArgs =>  match interpr_follow_next (getKey net data) (getExpr progConst trRn) (trArgs) with
+                | Some trArgs =>  match interpr_follow_next data (getExpr progConst trRn) (trArgs) with
                                   | Some authFail =>
                                     match unwrap data with
                                     | None => Some unwrapFailed
-                                    | Some idata => interpr_follow_next (getKey net idata) (getExpr progConst elRn) []
+                                    (* handover the inner_data to elseRule *)
+                                    | Some idata => interpr_follow_next idata (getExpr progConst elRn) []
                                     end
                                   | otherwise => otherwise
                                   end
@@ -742,7 +745,7 @@ Fixpoint interpr_follow (progConst:Program) (n:nat) (net:Network)
                 let '(ruleCall pRn pPl) := pRule in
                 let '(ruleCall aRn aPl) := aRule in
                 match (genArgs indexed pPl) with
-                (* this mean no more prefix, directly handover this packet to try anchor rule *)
+                (* this mean no more prefix, directly handover this packet to anchor rule *)
                 | None => match (genArgs indexed aPl) with
                           | None => None
                           | Some aArgs => interpr_follow_next data (getExpr progConst aRn) aArgs
@@ -765,6 +768,7 @@ Fixpoint interpr_findMatchRule (progConst:Program) (n:nat) (prog:Program) (net:N
               match bMatch with
               | false => interpr_findMatchRule progConst n' t net data
               | true => interpr_follow progConst n' net data (getExpr progConst rname) []
+              (* | true => option rtnDebugExpr (getExpr progConst rname) *)
               end
             end
   end.
