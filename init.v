@@ -26,7 +26,6 @@ Fixpoint nameToString (name:Name) : string :=
   | h :: t => h
   | _ => ""
   end.
-(* Definition Data := prod (prod Name Name) Data. *)
 
 Inductive Data : Type :=
 | wraped_data : Name -> Name -> Data -> Data
@@ -90,7 +89,12 @@ Inductive Action : Type :=
 | actRc            : RuleCall -> Action
 | actOrAnchor      : RuleCall -> RuleCall -> Action
 | actAnchor        : string -> Action.
-(* if first pattern match, use first one, if pattern does not match try second anchor call *)
+(*
+   if first pattern match, use first one,
+   if pattern does not match,
+   or get an exception of noMorePrefix,
+   try second anchor call
+ *)
 
 Inductive Expr : Type :=
   | expr : RuleName -> MatchPattern -> Action -> Expr.
@@ -116,14 +120,6 @@ Example sampleProgram1 :=
    )
   ].
 
-Print sampleProgram1.
-
-(* Definition tuple  := (true, true, true). *)
-
-Print MatchPattern.
-Print RuleParameter.
-
-(*  *)
 (* firstPart, rest(targetIncluded) *)
 Fixpoint findFirst (target:string) (nm:Name) : Name * Name :=
   match nm with
@@ -141,7 +137,6 @@ Compute findFirst "test"%string [  "a"%string;
                                    "test"%string;
                                    "e"%string
                                 ].
-Print MatchComp.
 
 (* Fixpoint getExactContent (mc:MatchComp) : string := *)
 (*   match mc with *)
@@ -151,8 +146,6 @@ Print MatchComp.
 (*   | mc_indexed mc' => getExactContent mc' *)
 (*   end. *)
 
-Compute (hd mc_wild []).
-              
 Fixpoint isMatch (nm:Name) (mp:MatchPattern) : bool * (list Name) :=
   match mp with
   | [] => match nm with
@@ -229,12 +222,6 @@ Definition empty_data : Data := data empty_name empty_name.
 Definition empty_expr : Expr := (expr (ruleName "") []
                                       (actRc (ruleCall (ruleName "") []))).
 
-(* Definition State : Type := prod bool (prod RuleName nat). *)
-(* bool, if it is firstTime, currentRule, recursive maximum times *)
-
-Print Expr.
-
-
 (* leave this part for later, right now, if not exist, just return False *)
 (* Fixpoint ruleDefined (nm:string) (prog:Program) := *)
 (*   match prog with *)
@@ -257,15 +244,6 @@ syntax check:
 2. indexedValue used is no more than indexed in matchPattern
 3. substitution call is no more than indexed in matchPattern
 *)
-
-
-Fixpoint checker (prog:Program) : bool :=
-  match prog with
-  | [] => true
-  | e::t => false
-  end.
-
-Print Expr.
 
 Fixpoint hasPrefix (para:list RuleParameter) : bool :=
   match para with
@@ -563,12 +541,6 @@ Qed.
 (* Proof. *)
 (* Admitted. *)
 
-(* Lemma interpreterTerminate : forall prog net data, *)
-(*     propertyCheck prog -> exists i, interpreter i prog net data emptyState = Some rst. *)
-(* Proof. *)
-(* Admitted. *)
-
-
 Inductive Rtn : Type :=
 | keyNotMatch : Rtn
 | authFail : Rtn 
@@ -603,15 +575,6 @@ Definition unwrap (data:Data) : option Data :=
 
 (* one more check on that data is mostly wraped once *)
 
-(* 当匹配时，目前先传n'，到时候再看是不是可以传更科学的数值，例如程序的最长环的长度 * name的长度？ *)
-Print isMatch.
-Print Expr.
-Print RuleParameter.
-
-
-(* Local Open Scope nat_scope. *)
-(* what will be empty isMatch look like? *)
-SearchAbout nat.
 Fixpoint getPrefix (nm:Name) (n:nat) : option Name :=
   let len := length nm in
   match Nat.ltb len n with
@@ -647,17 +610,6 @@ Example getPrefixTest4 : getPrefix [] 1 = None.
 Proof.
   reflexivity.
 Qed.
-
-  (* match n with *)
-  (* | 0 => Some [] *)
-  (* | S n' => match nm with *)
-  (*           | [] => None *)
-  (*           | h::t => match (getPrefix t n') with *)
-  (*                     | None => None *)
-  (*                     | Some rtn => Some (h::rtn) *)
-  (*                     end *)
-  (*           end *)
-  (* end. *)
 
 Fixpoint genArgs (indexed:list Name) (rp: list RuleParameter) : option (list Name) :=
   match rp with
@@ -724,51 +676,52 @@ Fixpoint interpr_follow (progConst:Program) (n:nat) (net:Network)
       match (argTest indexed args) with
       | false => Some keyNotMatch
       | true =>
-              match act with
-              | actTryElse tr el =>
-                let '(ruleCall trRn trPl) := tr in
-                let '(ruleCall elRn elPl) := el in
-                match (genArgs indexed trPl) with
-                | None => Some noMorePrefix
-                | Some trArgs =>  match interpr_follow_next data (getExpr progConst trRn) (trArgs) with
-                                  | Some authFail =>
-                                    (* Some (rtnDebugAny Expr (getExpr progConst elRn)) *)
-                                    match unwrap data with
-                                    | None => Some unwrapFailed
-                                    (* handover the inner_data to elseRule *)
-                                    | Some idata => interpr_follow_next idata (getExpr progConst elRn) []
-                                    end
-                                  | otherwise => otherwise
-                                  end
-                end
-              | actRc (ruleCall nxtRn nxtPl) => match (genArgs indexed nxtPl) with
-                                                | None => Some noMorePrefix
-                                                | Some nxtArgs => 
-                                                  interpr_follow_next (getKey net data) (getExpr progConst nxtRn) nxtArgs
-                                                end
-              | actAnchor addr => if beq_string addr (nameToString (getKeyLocator data))
-                                  then Some succ
-                                  else Some authFail
-              | actOrAnchor pRule aRule =>
-                let '(ruleCall pRn pPl) := pRule in
-                let '(ruleCall aRn aPl) := aRule in
-                match (genArgs indexed pPl) with
-                (* this mean no more prefix, directly handover this packet to anchor rule *)
-                | None =>
-                  (* (rtnDebugAny Data data) *)
-                  match (genArgs indexed aPl) with
-                  | None => None
-                  | Some aArgs => interpr_follow_next data (getExpr progConst aRn) aArgs
-                  end
-                | Some pArgs =>
-                  (* Some (rtnDebugAny Data data) *)
-                  interpr_follow_next (getKey net data) (getExpr progConst pRn) pArgs
-                end
-              end
+        match act with
+        | actTryElse tr el =>
+          let '(ruleCall trRn trPl) := tr in
+          let '(ruleCall elRn elPl) := el in
+          match (genArgs indexed trPl) with
+          | None => Some noMorePrefix
+          | Some trArgs =>  match interpr_follow_next data (getExpr progConst trRn) (trArgs) with
+                            | Some authFail =>
+                              (* Some (rtnDebugAny Expr (getExpr progConst elRn)) *)
+                              match unwrap data with
+                              | None => Some unwrapFailed
+                              (* handover the inner_data to elseRule *)
+                              | Some idata => interpr_follow_next idata (getExpr progConst elRn) []
+                              end
+                            | otherwise => otherwise
+                            end
+          end
+        | actRc (ruleCall nxtRn nxtPl) => match (genArgs indexed nxtPl) with
+                                          | None => Some noMorePrefix
+                                          | Some nxtArgs => 
+                                            interpr_follow_next (getKey net data) (getExpr progConst nxtRn) nxtArgs
+                                          end
+        | actAnchor addr => if beq_string addr (nameToString (getKeyLocator data))
+                            then Some succ
+                            else Some authFail
+        | actOrAnchor pRule aRule =>
+          let '(ruleCall pRn pPl) := pRule in
+          let '(ruleCall aRn aPl) := aRule in
+          match (genArgs indexed pPl) with
+          (* this mean no more prefix, directly handover this packet to anchor rule *)
+          | None =>
+            (* (rtnDebugAny Data data) *)
+            match (genArgs indexed aPl) with
+            | None => None
+            | Some aArgs => interpr_follow_next data (getExpr progConst aRn) aArgs
+            end
+          | Some pArgs =>
+            (* Some (rtnDebugAny Data data) *)
+            interpr_follow_next (getKey net data) (getExpr progConst pRn) pArgs
+          end
+        end
       end
     end
   end.
 
+(* 当匹配时，目前先传n'，到时候再看是不是可以传更科学的数值，例如程序的最长环的长度 * name的长度？ *)
 Fixpoint interpr_findMatchRule (progConst:Program) (n:nat) (prog:Program) (net:Network)
          (data:Data) : option Rtn:=
   match n with
@@ -784,23 +737,6 @@ Fixpoint interpr_findMatchRule (progConst:Program) (n:nat) (prog:Program) (net:N
               end
             end
   end.
-
-Fixpoint interpr_findMatchRule_check (progConst:Program) (n:nat) (prog:Program) (net:Network)
-         (data:Data) : option Expr:=
-  match n with
-  | 0 => None
-  | S n' => match prog with
-            | [] => None
-            | (expr rname mp act)::t =>
-              let '(bMatch, indexed) := isMatch (getName data) mp in
-              match bMatch with
-              | false => interpr_findMatchRule_check progConst n' t net data
-              | true => Some (getExpr progConst rname)
-              end
-            end
-  end.
-
-
 
 Example sampleProgram6 :=
   [(expr (ruleName "article")
@@ -900,63 +836,17 @@ Proof.
   reflexivity.
 Qed.
 
-(* check root-cert Name! *)
-(* prefix has "" or prefix has "" but no does not have *)
-
-
-
+Lemma interpreterTerminate : forall prog net data,
+    noLoop prog = true -> hasAnchor prog = true -> satisfyLpp prog = true ->
+    exists i rst, interpr_findMatchRule prog i prog net data = Some rst.
+Proof.
+  intros.
+Admitted.
 
 
 (* Compute interpr_follow sampleProgram6 9 blogNet dataAdmin (getExpr sampleProgram6 (ruleName "admin")) []. *)
 
 (* Compute isMatch (getName dataKey) [(mc_indexed (mc_sequence_wild "blog"));(mc_exact "blog");(mc_exact "KEY");(mc_wild)]. *)
-
-(* Compute let '(expr rname mp act) := (getExpr sampleProgram6 (ruleName "admin")) in *)
-(* match isMatch (getName dataAdmin) mp with *)
-(* | (false, _) => None *)
-(* | (true, indexed) =>  *)
-(*   match (argTest indexed []) with *)
-(*   | false => None *)
-(*   | true => match act with *)
-(*             | actRc (ruleCall nxtRn nxtPl) => match (genArgs indexed nxtPl) with *)
-(*                                               | None => None *)
-(*                                               | Some nxtArgs =>  *)
-(*                                                 Some (getKey blogNet dataAdmin) *)
-(*                                                 (* interpr_follow_next (getKey net data) (getExpr progConst nxtRn) nxtArgs *) *)
-(*                                               end *)
-(*             | _ => None *)
-(*             end *)
-(*   end *)
-(* end. *)
-
-              
-
-
-Definition beq_data (d1:Data) (d2:Data) : bool :=
-  beq_name (fst d1) (fst d2).
-
-
-Fixpoint bin_network (data:Data) (network:Network) : bool :=
-  match network with
-  | [] => false 
-  | h :: t => if (beq_data data h) then bin_network data t else false
-  end.
-
-(* we have to assume that the data from network is formed in a
-   ordered-list that the next one is the one that we want
-*)
-
-(* Fixpoint shrink_network (data:Data) (network:Network) : Network := *)
-(*   match network with *)
-(*   | [] => [] *)
-(*   | h :: t => if (beq_data data h) *)
-(*               then shrink_network data t *)
-(*               else h::(shrink_network data t) *)
-(*   end. *)
-
-
-
-(* Fixpoint execution (prog:program) (input:map) : bool := *)
 
 (* isMatch examples *)
 
@@ -965,23 +855,6 @@ Fixpoint bin_network (data:Data) (network:Network) : bool :=
    could be match.
    This result is very intuitive, since it only run a one-way pass alone the way, instead of
    doing a backtracking search that might have server cases. *)
-
-(* execution *)
-
-(* if prog violate some rules, then is will fail in checker *)
-
-(* Fixpoint checker (prog:program) : bool :=. *)
-
-(* Fixpoint execution (prog:program) (input:map) : bool := *)
-
-(* Fixpoint firstRule (prog:program) (data:Data) (network) *)
-(*          find the first match. *)
-(*   call execution (ruleName) parameter program Newdata network  *)
-
-       (* to make at least one parameter shrink, here we have to use network as List Data
-          and erase data every time you fetch it.
-        this serves the same function as having a map to prevent dealing with same data packet*)
-  
 
 (* todo *)
 (* how to use map *)
