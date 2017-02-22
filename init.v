@@ -1,13 +1,14 @@
 
-Require Import Coq.Arith.Arith.
 Require Import Coq.Lists.List.
 Require Import Coq.Strings.String.
 Require Import Coq.Strings.Ascii.
 Require Import Coq.Bool.Bool.
 Require Import Strlib.
+Require Import Notations Logic Datatypes.
 Require Export Setoid.
 
 Import ListNotations.
+
 
 Definition NameComp := string.
 
@@ -57,6 +58,7 @@ Inductive regMatch : MatchPattern -> Name -> Prop :=
     regMatch (r1 ++ r2) (s1 ++ s2).
 
 Local Open Scope string_scope.
+
 
 Example mcm1 : MatchCompMatch (mc_indexed (mc_sequence_wild "blog")) "a".
 Proof.
@@ -208,6 +210,13 @@ Proof.
   simpl. reflexivity.
 Qed.
 
+Example isMatch_test5 : isMatch ["a";"b";"c";"d"] [(mc_indexed (mc_sequence_wild "a"));
+                                                     (mc_exact "a");(mc_sequence_wild "")]
+                        = (true, [[]]).
+Proof.
+  simpl. reflexivity.
+Qed.
+
 Definition Network := list Data.
 
 Definition empty_name : Name := [""].
@@ -219,6 +228,7 @@ Definition empty_expr : Expr := (expr (ruleName "") []
 (* bool, if it is firstTime, currentRule, recursive maximum times *)
 
 Print Expr.
+
 
 (* leave this part for later, right now, if not exist, just return False *)
 (* Fixpoint ruleDefined (nm:string) (prog:Program) := *)
@@ -562,6 +572,8 @@ Inductive Rtn : Type :=
 | noMatchingRule : Rtn
 | noMorePrefix : Rtn
 | unwrapFailed : Rtn
+| debug1 : Rtn
+| debug2 : Rtn
 .
 
 Definition getKeyLocator (data:Data) : Name :=
@@ -589,17 +601,56 @@ Print isMatch.
 Print Expr.
 Print RuleParameter.
 
+
+(* Local Open Scope nat_scope. *)
+(* what will be empty isMatch look like? *)
+SearchAbout nat.
 Fixpoint getPrefix (nm:Name) (n:nat) : option Name :=
-  match n with
-  | 0 => Some []
-  | S n' => match nm with
-            | [] => None
-            | h::t => match (getPrefix t n') with
-                      | None => None
-                      | Some rtn => Some (h::rtn)
-                      end
-            end
+  let len := length nm in
+  match Nat.ltb len n with
+  | true => None
+  | false => match Nat.eqb len n with
+             | true => Some []
+             | false => match nm with
+                        | h::t => match (getPrefix t n) with
+                                  | None => None
+                                  | Some rtn => Some (h::rtn)
+                                  end
+                        | _ => None
+                        end
+             end
   end.
+
+Example getPrefixTest1 : getPrefix ["a";"b";"c";"d"] 2 = Some ["a";"b"].
+Proof.
+  reflexivity.
+Qed.
+
+Example getPrefixTest2 : getPrefix ["c";"d"] 2 = Some [].
+Proof.
+  reflexivity.
+Qed.
+
+Example getPrefixTest3 : getPrefix ["c";"d"] 3 = None.
+Proof.
+  reflexivity.
+Qed.
+
+Example getPrefixTest4 : getPrefix [] 1 = None.
+Proof.
+  reflexivity.
+Qed.
+
+  (* match n with *)
+  (* | 0 => Some [] *)
+  (* | S n' => match nm with *)
+  (*           | [] => None *)
+  (*           | h::t => match (getPrefix t n') with *)
+  (*                     | None => None *)
+  (*                     | Some rtn => Some (h::rtn) *)
+  (*                     end *)
+  (*           end *)
+  (* end. *)
 
 Fixpoint genArgs (indexed:list Name) (rp: list RuleParameter) : option (list Name) :=
   match rp with
@@ -610,8 +661,8 @@ Fixpoint genArgs (indexed:list Name) (rp: list RuleParameter) : option (list Nam
                               | None => None
                               | Some rtn => Some (nm :: rtn)
                               end
-            | rp_prefixOfIndexed n nPrefix => let nm := (nth (pred n) indexed empty_name) in
-                                              match (getPrefix nm nPrefix) with
+            | rp_prefixOfIndexed n minusN => let nm := (nth (pred n) indexed empty_name) in
+                                              match (getPrefix nm minusN) with
                                               | None => None
                                               | Some prefix => match (genArgs indexed t) with
                                                                | None => None
@@ -691,16 +742,12 @@ Fixpoint interpr_follow (progConst:Program) (n:nat) (net:Network)
                 let '(ruleCall pRn pPl) := pRule in
                 let '(ruleCall aRn aPl) := aRule in
                 match (genArgs indexed pPl) with
-                | None => Some noMorePrefix
-                | Some pArgs =>
-                  match interpr_follow_next (getKey net data) (getExpr progConst pRn) pArgs with
-                  | Some keyNotMatch =>
-                    match (genArgs indexed aPl) with
-                    | None => None
-                    | Some aArgs => interpr_follow_next (getKey net data) (getExpr progConst aRn) aArgs
-                    end
-                  | otherwise => otherwise
-                  end
+                (* this mean no more prefix, directly handover this packet to try anchor rule *)
+                | None => match (genArgs indexed aPl) with
+                          | None => None
+                          | Some aArgs => interpr_follow_next data (getExpr progConst aRn) aArgs
+                          end
+                | Some pArgs => interpr_follow_next (getKey net data) (getExpr progConst pRn) pArgs
                 end
               end
       end
@@ -765,7 +812,85 @@ Example dataKey := data ["domain";"test";"blog";"KEY";"1"] [""].
 
 Example blogNet := [dataKey; dataAdmin; dataAuthor; dataArticle].
 
-Compute interpr_findMatchRule sampleProgram6 10 sampleProgram6 blogNet dataArticle.
+Example interpreterTest1 : interpr_findMatchRule sampleProgram6 10 sampleProgram6 blogNet dataArticle = Some succ.
+Proof.
+  reflexivity.
+Qed.
+
+Example sampleProgramNdns :=
+  [(expr (ruleName "CacheResolver")
+         [(mc_exact "NDNS-R");(mc_sequence_wild "")]
+         (actTryElse (ruleCall (ruleName "Local") []) (ruleCall (ruleName "NDNS") []))
+   );
+     (expr (ruleName "NDNS-data")
+           [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_wild);(mc_exact "NS");(mc_indexed (mc_sequence_wild ""))]
+           (actRc (ruleCall (ruleName "NDNS-DSK") [(rp_indexed 1)]))
+     );
+
+     (expr (ruleName "NDNS-DSK")
+           [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_exact "DSK");(mc_indexed (mc_sequence_wild ""))]
+           (actRc (ruleCall (ruleName "NDNS-KSK") [(rp_indexed 1)]))
+     );
+
+     (expr (ruleName "NDNS-KSK")
+           [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_exact "KSK");(mc_indexed (mc_sequence_wild ""))]
+           (actOrAnchor (ruleCall (ruleName "NDNS-DKEY") [(rp_prefixOfIndexed 1 1)])
+                        (ruleCall (ruleName "NDNS-Root") []))
+     );
+
+     (expr (ruleName "NDNS-DKEY")
+           [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_wild);(mc_exact "DKEY");(mc_indexed (mc_sequence_wild ""))]
+           (actRc (ruleCall (ruleName "NDNS-DSK") [(rp_indexed 1)]))
+     );
+
+     (expr (ruleName "Local")
+           [(mc_exact "NDNS-R");(mc_sequence_wild "")]
+           (actAnchor "/usr/local/ucla/key")
+     );
+
+     (expr (ruleName "NDNS-Root")
+           [(mc_exact "NDNS");(mc_sequence_wild "")]
+           (actAnchor "/usr/local/dns/key")
+     )
+  ].
+
+(* "NDNS-R/com/ucla/NDNS/www/NS/v1/s1" *)
+(*   "usr/local/ucla/key" *)
+(* "com/ucla/NDNS/www/NS/v1/s1" *)
+(* "com/ucla/NDNS/DSK/CERT/1" *)
+(* "com/ucla/NDNS/KSK/CERT/1" *)
+(* "com/NDNS/ucla/DKEY/CERT/1" *)
+(* "com/NDNS/DSK/CERT/1" *)
+(* "com/NDNS/KSK/CERT/1" *)
+(* "NDNS/com/DKEY/CERT/1" *)
+(* "NDNS/DSK/CERT/1" *)
+(* "NDNS/KSK/CERT/1" *)
+(* "usr/local/dns/key" *)
+
+Example data0 := data ["com";"ucla";"NDNS";"www";"NS";"v1";"s1"] ["com";"ucla";"NDNS";"DSK";"CERT";"1"].
+Example data1 := data ["com";"ucla";"NDNS";"DSK";"CERT";"1"] ["com";"ucla";"NDNS";"KSK";"CERT";"1"].
+Example data2 := data ["com";"ucla";"NDNS";"KSK";"CERT";"1"] ["com";"NDNS";"ucla";"DKEY";"CERT";"1"].
+Example data3 := data ["com";"NDNS";"ucla";"DKEY";"CERT";"1"] ["com";"NDNS";"DSK";"CERT";"1"].
+Example data4 := data ["com";"NDNS";"DSK";"CERT";"1"] ["com";"NDNS";"KSK";"CERT";"1"].
+Example data5 := data ["com";"NDNS";"KSK";"CERT";"1"] ["NDNS";"com";"DKEY";"CERT";"1"].
+Example data6 := data ["NDNS";"com";"DKEY";"CERT";"1"] ["NDNS";"DSK";"CERT";"1"].
+Example data7 := data ["NDNS";"DSK";"CERT";"1"] ["NDNS";"KSK";"CERT";"1"].
+Example data8 := data ["NDNS";"KSK";"CERT";"1"] ["usr/local/dns/key"].
+Example data9 := data ["usr/local/dns/key"] [].
+Example dataR := wraped_data ["NDNS-R";"com";"ucla";"NDNS";"www";"NS";"v1";"s1"] ["/usr/local/ucla/key"] data0.
+Example NdnsNet := [data0;data1;data2;data3;data4;data5;data6;data7;data8;data9;dataR].
+
+Compute interpr_findMatchRule sampleProgramNdns 100 sampleProgramNdns NdnsNet dataR.
+
+Compute isMatch (getName data5) [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_exact "KSK");(mc_indexed (mc_sequence_wild ""))].
+
+
+(* check root-cert Name! *)
+(* prefix has "" or prefix has "" but no does not have *)
+
+
+
+
 
 (* Compute interpr_follow sampleProgram6 9 blogNet dataAdmin (getExpr sampleProgram6 (ruleName "admin")) []. *)
 
