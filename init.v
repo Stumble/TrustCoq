@@ -21,6 +21,11 @@ Fixpoint beq_name (n1:Name) (n2:Name) : bool :=
   | _, _ => false
   end.
 
+Fixpoint nameToString (name:Name) : string :=
+  match name with
+  | h :: t => h
+  | _ => ""
+  end.
 (* Definition Data := prod (prod Name Name) Data. *)
 
 Inductive Data : Type :=
@@ -727,6 +732,7 @@ Fixpoint interpr_follow (progConst:Program) (n:nat) (net:Network)
                 | None => Some noMorePrefix
                 | Some trArgs =>  match interpr_follow_next data (getExpr progConst trRn) (trArgs) with
                                   | Some authFail =>
+                                    (* Some (rtnDebugAny Expr (getExpr progConst elRn)) *)
                                     match unwrap data with
                                     | None => Some unwrapFailed
                                     (* handover the inner_data to elseRule *)
@@ -740,17 +746,23 @@ Fixpoint interpr_follow (progConst:Program) (n:nat) (net:Network)
                                                 | Some nxtArgs => 
                                                   interpr_follow_next (getKey net data) (getExpr progConst nxtRn) nxtArgs
                                                 end
-              | actAnchor addr => Some succ
+              | actAnchor addr => if beq_string addr (nameToString (getKeyLocator data))
+                                  then Some succ
+                                  else Some authFail
               | actOrAnchor pRule aRule =>
                 let '(ruleCall pRn pPl) := pRule in
                 let '(ruleCall aRn aPl) := aRule in
                 match (genArgs indexed pPl) with
                 (* this mean no more prefix, directly handover this packet to anchor rule *)
-                | None => match (genArgs indexed aPl) with
-                          | None => None
-                          | Some aArgs => interpr_follow_next data (getExpr progConst aRn) aArgs
-                          end
-                | Some pArgs => interpr_follow_next (getKey net data) (getExpr progConst pRn) pArgs
+                | None =>
+                  (* (rtnDebugAny Data data) *)
+                  match (genArgs indexed aPl) with
+                  | None => None
+                  | Some aArgs => interpr_follow_next data (getExpr progConst aRn) aArgs
+                  end
+                | Some pArgs =>
+                  (* Some (rtnDebugAny Data data) *)
+                  interpr_follow_next (getKey net data) (getExpr progConst pRn) pArgs
                 end
               end
       end
@@ -812,7 +824,7 @@ Example sampleProgram6 :=
 Example dataArticle := data ["domain";"test";"blog";"article";"1"] ["domain";"test";"blog";"author";"1"].
 Example dataAuthor := data ["domain";"test";"blog";"author";"1"] ["domain";"test";"blog";"admin";"1"].
 Example dataAdmin:= data ["domain";"test";"blog";"admin";"1"] ["domain";"test";"blog";"KEY";"1"].
-Example dataKey := data ["domain";"test";"blog";"KEY";"1"] [""].
+Example dataKey := data ["domain";"test";"blog";"KEY";"1"] ["/usr/local/key1"].
 
 Example blogNet := [dataKey; dataAdmin; dataAuthor; dataArticle].
 
@@ -824,7 +836,7 @@ Qed.
 Example sampleProgramNdns :=
   [(expr (ruleName "CacheResolver")
          [(mc_exact "NDNS-R");(mc_sequence_wild "")]
-         (actTryElse (ruleCall (ruleName "Local") []) (ruleCall (ruleName "NDNS") []))
+         (actTryElse (ruleCall (ruleName "Local") []) (ruleCall (ruleName "NDNS-data") []))
    );
      (expr (ruleName "NDNS-data")
            [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_wild);(mc_exact "NS");(mc_indexed (mc_sequence_wild ""))]
@@ -879,15 +891,14 @@ Example data4 := data ["com";"NDNS";"DSK";"CERT";"1"] ["com";"NDNS";"KSK";"CERT"
 Example data5 := data ["com";"NDNS";"KSK";"CERT";"1"] ["NDNS";"com";"DKEY";"CERT";"1"].
 Example data6 := data ["NDNS";"com";"DKEY";"CERT";"1"] ["NDNS";"DSK";"CERT";"1"].
 Example data7 := data ["NDNS";"DSK";"CERT";"1"] ["NDNS";"KSK";"CERT";"1"].
-Example data8 := data ["NDNS";"KSK";"CERT";"1"] ["usr/local/dns/key"].
-Example data9 := data ["usr/local/dns/key"] [].
-Example dataR := wraped_data ["NDNS-R";"com";"ucla";"NDNS";"www";"NS";"v1";"s1"] ["/usr/local/ucla/key"] data0.
-Example NdnsNet := [data0;data1;data2;data3;data4;data5;data6;data7;data8;data9;dataR].
+Example data8 := data ["NDNS";"KSK";"CERT";"1"] ["/usr/local/dns/key"].
+Example dataR := wraped_data ["NDNS-R";"com";"ucla";"NDNS";"www";"NS";"v1";"s1"] ["/usr/local/mit/key"] data0.
+Example NdnsNet := [data0;data1;data2;data3;data4;data5;data6;data7;data8;dataR].
 
-Compute interpr_findMatchRule sampleProgramNdns 100 sampleProgramNdns NdnsNet dataR.
-
-Compute isMatch (getName data5) [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_exact "KSK");(mc_indexed (mc_sequence_wild ""))].
-
+Example interpreterTest2 : interpr_findMatchRule sampleProgramNdns 100 sampleProgramNdns NdnsNet dataR = Some succ.
+Proof.
+  reflexivity.
+Qed.
 
 (* check root-cert Name! *)
 (* prefix has "" or prefix has "" but no does not have *)
