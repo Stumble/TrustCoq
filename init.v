@@ -836,12 +836,48 @@ Proof.
   reflexivity.
 Qed.
 
-Lemma interpreterTerminate : forall prog net data,
-    noLoop prog = true -> hasAnchor prog = true -> satisfyLpp prog = true ->
-    exists i rst, interpr_findMatchRule prog i prog net data = Some rst.
+Fixpoint exprLength (prog:Program) : nat :=
+  match prog with
+  | [] => 0
+  | h::t => Nat.add 1 (exprLength t)
+  end.
+  
+Fixpoint similarFindMatch (n:nat) (l:list nat) (target:nat) : option bool :=
+  match n with
+  | 0 => None
+  | S n' => match l with
+            | [] => Some false
+            | h::t => if Nat.eqb h target
+                      then Some true
+                      else similarFindMatch n' t target
+            end
+  end.
+
+(* Arguments similarFindMatch n l target: simpl never. *)
+(* Arguments Nat.add n m: simpl never. *)
+(* Arguments Nat.add n m : simpl never. *)
+Lemma similarProofTerminate : forall l target,
+    exists nStep rtn, similarFindMatch nStep l target = Some rtn.
 Proof.
   intros.
-Admitted.
+  exists (S (List.length l)).
+  induction l as [|h t]. 
+  - simpl. exists false. reflexivity.
+  - destruct IHt. simpl. destruct Nat.eqb.
+    + eauto.
+    + eauto.
+Qed.
+
+Lemma interpreterTerminate : forall prog net data,
+    noLoop prog = true -> hasAnchor prog = true -> satisfyLpp prog = true ->
+    exists i rval, let progConst := prog in interpr_findMatchRule progConst i prog net data = Some rval.
+Proof.
+  intros.
+  exists (Nat.add 10 (exprLength prog)).
+  (* unfold interpr_findMatchRule. *)
+  induction prog as [|expr t].
+  - simpl. exists noMatchingRule. reflexivity.
+  - 
 
 
 (* Compute interpr_follow sampleProgram6 9 blogNet dataAdmin (getExpr sampleProgram6 (ruleName "admin")) []. *)
