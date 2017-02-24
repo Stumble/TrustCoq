@@ -1,4 +1,3 @@
-
 Require Import Coq.Lists.List.
 Require Import Coq.Strings.String.
 Require Import Coq.Strings.Ascii.
@@ -81,10 +80,10 @@ Inductive RuleParameter : Type :=
   | rp_prefixOfIndexed : nat -> nat -> RuleParameter.
 
 Inductive RuleCall : Type :=
-  | ruleCall : RuleName -> list RuleParameter -> RuleCall.  
+  | ruleCall : RuleName -> list RuleParameter -> RuleCall.
 
 Inductive Action : Type :=
-| actTryElse       : RuleCall -> RuleCall -> Action  
+| actTryElse       : RuleCall -> RuleCall -> Action
 (* try expr1, if authentication failed, unwrap data and try Rule *)
 | actRc            : RuleCall -> Action
 | actOrAnchor      : RuleCall -> RuleCall -> Action
@@ -269,6 +268,28 @@ Fixpoint actionOf (name:string) (prog:Program) : Action :=
             end
   end.
 
+Fixpoint has1stArg (para:list RuleParameter) : bool :=
+  match para with
+  | [] => false
+  | p::t => match p with
+            | rp_indexed _ => true
+            | rp_prefixOfIndexed _ n => Nat.leb n 1
+            end
+  end.
+
+Fixpoint mustHave1stArg (prog:Program) : bool :=
+  match prog with
+  | [] => true
+  | (expr _ _ act)::t => match act with
+                      | actTryElse _ _=> mustHave1stArg t
+                      | actOrAnchor (ruleCall _ para) _ =>
+                        if has1stArg para then mustHave1stArg t
+                        else false
+                      | actRc (ruleCall _ para) => if has1stArg para then mustHave1stArg t
+                                            else false
+                      | actAnchor _ => mustHave1stArg t
+                         end
+  end.
 
 Fixpoint hasActLoop (rname:string) (act:Action) (limit:nat) (prog:Program) : bool :=
   match limit with
@@ -306,7 +327,7 @@ Definition noLoop (prog:Program) := checkNoLoopImpl prog prog.
 
 Example checkLoopTest1: noLoop sampleProgram1 = true.
 Proof.
-  unfold noLoop. simpl. reflexivity. 
+  unfold noLoop. simpl. reflexivity.
   Qed.
 
 Example sampleProgram2 :=
@@ -439,7 +460,7 @@ Fixpoint noSameAnchorBeforeBack (prog:Program) (anchorName:string) (homeName:str
   | 0 => false
   | S n' =>
     match act with
-    | actTryElse (ruleCall (ruleName tryRule) _) _ => 
+    | actTryElse (ruleCall (ruleName tryRule) _) _ =>
       if beq_string tryRule homeName then true
       else (if beq_string tryRule anchorName
             then false
@@ -462,7 +483,7 @@ Fixpoint noSameAnchorBeforeBack (prog:Program) (anchorName:string) (homeName:str
       )
     end
   end.
-         
+
 
 Fixpoint satisfyLppCheck (e:Expr) (prog:Program) : bool :=
   let n := List.length prog in
@@ -470,7 +491,7 @@ Fixpoint satisfyLppCheck (e:Expr) (prog:Program) : bool :=
   | expr (ruleName exprName) mp act =>
     match act with
     | actOrAnchor (ruleCall (ruleName nextRule) _) (ruleCall (ruleName anchorRule) _) =>
-      noSameAnchorBeforeBack prog anchorRule exprName n (actionOf nextRule prog) 
+      noSameAnchorBeforeBack prog anchorRule exprName n (actionOf nextRule prog)
     | _ => true
     end
   end.
@@ -543,7 +564,7 @@ Qed.
 
 Inductive Rtn : Type :=
 | keyNotMatch : Rtn
-| authFail : Rtn 
+| authFail : Rtn
 | networkFail : Rtn
 | succ : Rtn
 | noMatchingRule : Rtn
@@ -695,7 +716,7 @@ Fixpoint interpr_follow (progConst:Program) (n:nat) (net:Network)
           end
         | actRc (ruleCall nxtRn nxtPl) => match (genArgs indexed nxtPl) with
                                           | None => Some noMorePrefix
-                                          | Some nxtArgs => 
+                                          | Some nxtArgs =>
                                             interpr_follow_next (getKey net data) (getExpr progConst nxtRn) nxtArgs
                                           end
         | actAnchor addr => if beq_string addr (nameToString (getKeyLocator data))
@@ -722,20 +743,23 @@ Fixpoint interpr_follow (progConst:Program) (n:nat) (net:Network)
   end.
 
 (* 当匹配时，目前先传n'，到时候再看是不是可以传更科学的数值，例如程序的最长环的长度 * name的长度？ *)
-Fixpoint interpr_findMatchRule (progConst:Program) (n:nat) (prog:Program) (net:Network)
-         (data:Data) : option Rtn:=
-  match n with
-  | 0 => None
-  | S n' => match prog with
-            | [] => Some noMatchingRule
-            | (expr rname mp act)::t =>
-              let '(bMatch, indexed) := isMatch (getName data) mp in
-              match bMatch with
-              | false => interpr_findMatchRule progConst n' t net data
-              | true => interpr_follow progConst n' net data (getExpr progConst rname) []
-              (* | true => option rtnDebugExpr (getExpr progConst rname) *)
-              end
-            end
+Fixpoint interpr_findMatchRule (prog:Program) (data:Data) : option Expr :=
+  match prog with
+  | [] => None
+  | h::t =>
+    let '(expr rname mp act) := h in
+    let '(bMatch, indexed) := isMatch (getName data) mp in
+    match bMatch with
+    | false => interpr_findMatchRule t data
+    | true => Some h
+    end
+  end.
+
+Fixpoint interpr_main (prog:Program) (n:nat)
+         (net:Network) (data:Data) : option Rtn :=
+  match interpr_findMatchRule prog data with
+  | None => Some noMatchingRule
+  | Some eMatched => interpr_follow prog n net data eMatched []
   end.
 
 Example sampleProgram6 :=
@@ -764,7 +788,7 @@ Example dataKey := data ["domain";"test";"blog";"KEY";"1"] ["/usr/local/key1"].
 
 Example blogNet := [dataKey; dataAdmin; dataAuthor; dataArticle].
 
-Example interpreterTest1 : interpr_findMatchRule sampleProgram6 10 sampleProgram6 blogNet dataArticle = Some succ.
+Example interpreterTest1 : interpr_main sampleProgram6 10 blogNet dataArticle = Some succ.
 Proof.
   reflexivity.
 Qed.
@@ -831,7 +855,7 @@ Example data8 := data ["NDNS";"KSK";"CERT";"1"] ["/usr/local/dns/key"].
 Example dataR := wraped_data ["NDNS-R";"com";"ucla";"NDNS";"www";"NS";"v1";"s1"] ["/usr/local/mit/key"] data0.
 Example NdnsNet := [data0;data1;data2;data3;data4;data5;data6;data7;data8;dataR].
 
-Example interpreterTest2 : interpr_findMatchRule sampleProgramNdns 100 sampleProgramNdns NdnsNet dataR = Some succ.
+Example interpreterTest2 : interpr_main sampleProgramNdns 100 NdnsNet dataR = Some succ.
 Proof.
   reflexivity.
 Qed.
@@ -841,7 +865,7 @@ Fixpoint exprLength (prog:Program) : nat :=
   | [] => 0
   | h::t => Nat.add 1 (exprLength t)
   end.
-  
+
 Fixpoint similarFindMatch (n:nat) (l:list nat) (target:nat) : option bool :=
   match n with
   | 0 => None
@@ -861,7 +885,7 @@ Lemma similarProofTerminate : forall l target,
 Proof.
   intros.
   exists (S (List.length l)).
-  induction l as [|h t]. 
+  induction l as [|h t].
   - simpl. exists false. reflexivity.
   - destruct IHt. simpl. destruct Nat.eqb.
     + eauto.
@@ -870,14 +894,14 @@ Qed.
 
 Lemma interpreterTerminate : forall prog net data,
     noLoop prog = true -> hasAnchor prog = true -> satisfyLpp prog = true ->
-    exists i rval, let progConst := prog in interpr_findMatchRule progConst i prog net data = Some rval.
+    exists i rval, interpr_main prog i net data = Some rval.
 Proof.
   intros.
   exists (Nat.add 10 (exprLength prog)).
   (* unfold interpr_findMatchRule. *)
   induction prog as [|expr t].
   - simpl. exists noMatchingRule. reflexivity.
-  - 
+  -
 
 
 (* Compute interpr_follow sampleProgram6 9 blogNet dataAdmin (getExpr sampleProgram6 (ruleName "admin")) []. *)
