@@ -83,7 +83,8 @@ Inductive RuleCall : Type :=
   | ruleCall : RuleName -> list RuleParameter -> RuleCall.
 
 Inductive Action : Type :=
-| actTryElse       : RuleCall -> RuleCall -> Action
+(* TryElse is temporarily removed, it introduces too much problems when proofing *)
+(* | actTryElse       : RuleCall -> RuleCall -> Action *)
 (* try expr1, if authentication failed, unwrap data and try Rule *)
 | actRc            : RuleCall -> Action
 | actOrAnchor      : RuleCall -> RuleCall -> Action
@@ -281,7 +282,6 @@ Fixpoint mustHave1stArg (prog:Program) : bool :=
   match prog with
   | [] => true
   | (expr _ _ act)::t => match act with
-                      | actTryElse _ _=> mustHave1stArg t
                       | actOrAnchor (ruleCall _ para) _ =>
                         if has1stArg para then mustHave1stArg t
                         else false
@@ -296,9 +296,6 @@ Fixpoint hasActLoop (rname:string) (act:Action) (limit:nat) (prog:Program) : boo
   | 0 => false
   | S n' =>
     match act with
-    | actTryElse (ruleCall (ruleName rcname) para) _ => (if beq_string rcname rname
-                                                         then true
-                                                         else (hasActLoop rname (actionOf rcname prog) n' prog))
     | actOrAnchor (ruleCall (ruleName rcname) para) _ => if hasPrefix para then false else
                                                            (if (beq_string rcname rname) then true
                                                            else hasActLoop rname (actionOf rcname prog) n' prog)
@@ -383,10 +380,6 @@ Fixpoint hasActAnchor (rname:string) (act:Action) (limit:nat) (prog:Program) : b
   | 0 => false
   | S n' =>
     match act with
-    | actTryElse (ruleCall (ruleName tryRule) _) (ruleCall (ruleName elseRule) _) =>
-      if andb (hasActAnchor tryRule (actionOf tryRule prog) n' prog) (hasActAnchor elseRule (actionOf elseRule prog) n' prog)
-      then true
-      else false
     | actOrAnchor _ _ => true
     | actRc (ruleCall (ruleName rcname) para) => (hasActAnchor rcname (actionOf rcname prog) n' prog)
     | actAnchor _ => true
@@ -460,11 +453,6 @@ Fixpoint noSameAnchorBeforeBack (prog:Program) (anchorName:string) (homeName:str
   | 0 => false
   | S n' =>
     match act with
-    | actTryElse (ruleCall (ruleName tryRule) _) _ =>
-      if beq_string tryRule homeName then true
-      else (if beq_string tryRule anchorName
-            then false
-            else (noSameAnchorBeforeBack prog anchorName homeName n' (actionOf tryRule prog )))
     | actAnchor _ => true
     | actOrAnchor (ruleCall (ruleName nextRule) _) (ruleCall (ruleName anchorRule) _) =>
       if beq_string anchorRule anchorName
@@ -569,7 +557,6 @@ Inductive Rtn : Type :=
 | succ : Rtn
 | noMatchingRule : Rtn
 | noMorePrefix : Rtn
-| unwrapFailed : Rtn
 | debug1 : Rtn
 | debug2 : Rtn
 | rtnDebugExpr : Expr -> Rtn
@@ -698,22 +685,6 @@ Fixpoint interpr_follow (progConst:Program) (n:nat) (net:Network)
       | false => Some keyNotMatch
       | true =>
         match act with
-        | actTryElse tr el =>
-          let '(ruleCall trRn trPl) := tr in
-          let '(ruleCall elRn elPl) := el in
-          match (genArgs indexed trPl) with
-          | None => Some noMorePrefix
-          | Some trArgs =>  match interpr_follow_next data (getExpr progConst trRn) (trArgs) with
-                            | Some authFail =>
-                              (* Some (rtnDebugAny Expr (getExpr progConst elRn)) *)
-                              match unwrap data with
-                              | None => Some unwrapFailed
-                              (* handover the inner_data to elseRule *)
-                              | Some idata => interpr_follow_next idata (getExpr progConst elRn) []
-                              end
-                            | otherwise => otherwise
-                            end
-          end
         | actRc (ruleCall nxtRn nxtPl) => match (genArgs indexed nxtPl) with
                                           | None => Some noMorePrefix
                                           | Some nxtArgs =>
@@ -792,42 +763,45 @@ Proof.
   reflexivity.
 Qed.
 
-Example sampleProgramNdns :=
-  [(expr (ruleName "CacheResolver")
-         [(mc_exact "NDNS-R");(mc_sequence_wild "")]
-         (actTryElse (ruleCall (ruleName "Local") []) (ruleCall (ruleName "NDNS-data") []))
-   );
-     (expr (ruleName "NDNS-data")
-           [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_wild);(mc_exact "NS");(mc_indexed (mc_sequence_wild ""))]
-           (actRc (ruleCall (ruleName "NDNS-DSK") [(rp_indexed 1)]))
-     );
+(* -------------------------------- example NDNS --------------------------- *)
+(* This example includes use of TryElse rule, now it's temporarily removed *)
 
-     (expr (ruleName "NDNS-DSK")
-           [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_exact "DSK");(mc_indexed (mc_sequence_wild ""))]
-           (actRc (ruleCall (ruleName "NDNS-KSK") [(rp_indexed 1)]))
-     );
+(* Example sampleProgramNdns := *)
+(*   [(expr (ruleName "CacheResolver") *)
+(*          [(mc_exact "NDNS-R");(mc_sequence_wild "")] *)
+(*          (actTryElse (ruleCall (ruleName "Local") []) (ruleCall (ruleName "NDNS-data") [])) *)
+(*    ); *)
+(*      (expr (ruleName "NDNS-data") *)
+(*            [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_wild);(mc_exact "NS");(mc_indexed (mc_sequence_wild ""))] *)
+(*            (actRc (ruleCall (ruleName "NDNS-DSK") [(rp_indexed 1)])) *)
+(*      ); *)
 
-     (expr (ruleName "NDNS-KSK")
-           [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_exact "KSK");(mc_indexed (mc_sequence_wild ""))]
-           (actOrAnchor (ruleCall (ruleName "NDNS-DKEY") [(rp_prefixOfIndexed 1 1)])
-                        (ruleCall (ruleName "NDNS-Root") []))
-     );
+(*      (expr (ruleName "NDNS-DSK") *)
+(*            [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_exact "DSK");(mc_indexed (mc_sequence_wild ""))] *)
+(*            (actRc (ruleCall (ruleName "NDNS-KSK") [(rp_indexed 1)])) *)
+(*      ); *)
 
-     (expr (ruleName "NDNS-DKEY")
-           [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_wild);(mc_exact "DKEY");(mc_indexed (mc_sequence_wild ""))]
-           (actRc (ruleCall (ruleName "NDNS-DSK") [(rp_indexed 1)]))
-     );
+(*      (expr (ruleName "NDNS-KSK") *)
+(*            [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_exact "KSK");(mc_indexed (mc_sequence_wild ""))] *)
+(*            (actOrAnchor (ruleCall (ruleName "NDNS-DKEY") [(rp_prefixOfIndexed 1 1)]) *)
+(*                         (ruleCall (ruleName "NDNS-Root") [])) *)
+(*      ); *)
 
-     (expr (ruleName "Local")
-           [(mc_exact "NDNS-R");(mc_sequence_wild "")]
-           (actAnchor "/usr/local/ucla/key")
-     );
+(*      (expr (ruleName "NDNS-DKEY") *)
+(*            [(mc_indexed (mc_sequence_wild "NDNS"));(mc_exact "NDNS");(mc_wild);(mc_exact "DKEY");(mc_indexed (mc_sequence_wild ""))] *)
+(*            (actRc (ruleCall (ruleName "NDNS-DSK") [(rp_indexed 1)])) *)
+(*      ); *)
 
-     (expr (ruleName "NDNS-Root")
-           [(mc_exact "NDNS");(mc_sequence_wild "")]
-           (actAnchor "/usr/local/dns/key")
-     )
-  ].
+(*      (expr (ruleName "Local") *)
+(*            [(mc_exact "NDNS-R");(mc_sequence_wild "")] *)
+(*            (actAnchor "/usr/local/ucla/key") *)
+(*      ); *)
+
+(*      (expr (ruleName "NDNS-Root") *)
+(*            [(mc_exact "NDNS");(mc_sequence_wild "")] *)
+(*            (actAnchor "/usr/local/dns/key") *)
+(*      ) *)
+(*   ]. *)
 
 (* "NDNS-R/com/ucla/NDNS/www/NS/v1/s1" *)
 (*   "usr/local/ucla/key" *)
@@ -842,22 +816,24 @@ Example sampleProgramNdns :=
 (* "NDNS/KSK/CERT/1" *)
 (* "usr/local/dns/key" *)
 
-Example data0 := data ["com";"ucla";"NDNS";"www";"NS";"v1";"s1"] ["com";"ucla";"NDNS";"DSK";"CERT";"1"].
-Example data1 := data ["com";"ucla";"NDNS";"DSK";"CERT";"1"] ["com";"ucla";"NDNS";"KSK";"CERT";"1"].
-Example data2 := data ["com";"ucla";"NDNS";"KSK";"CERT";"1"] ["com";"NDNS";"ucla";"DKEY";"CERT";"1"].
-Example data3 := data ["com";"NDNS";"ucla";"DKEY";"CERT";"1"] ["com";"NDNS";"DSK";"CERT";"1"].
-Example data4 := data ["com";"NDNS";"DSK";"CERT";"1"] ["com";"NDNS";"KSK";"CERT";"1"].
-Example data5 := data ["com";"NDNS";"KSK";"CERT";"1"] ["NDNS";"com";"DKEY";"CERT";"1"].
-Example data6 := data ["NDNS";"com";"DKEY";"CERT";"1"] ["NDNS";"DSK";"CERT";"1"].
-Example data7 := data ["NDNS";"DSK";"CERT";"1"] ["NDNS";"KSK";"CERT";"1"].
-Example data8 := data ["NDNS";"KSK";"CERT";"1"] ["/usr/local/dns/key"].
-Example dataR := wraped_data ["NDNS-R";"com";"ucla";"NDNS";"www";"NS";"v1";"s1"] ["/usr/local/mit/key"] data0.
-Example NdnsNet := [data0;data1;data2;data3;data4;data5;data6;data7;data8;dataR].
+(* Example data0 := data ["com";"ucla";"NDNS";"www";"NS";"v1";"s1"] ["com";"ucla";"NDNS";"DSK";"CERT";"1"]. *)
+(* Example data1 := data ["com";"ucla";"NDNS";"DSK";"CERT";"1"] ["com";"ucla";"NDNS";"KSK";"CERT";"1"]. *)
+(* Example data2 := data ["com";"ucla";"NDNS";"KSK";"CERT";"1"] ["com";"NDNS";"ucla";"DKEY";"CERT";"1"]. *)
+(* Example data3 := data ["com";"NDNS";"ucla";"DKEY";"CERT";"1"] ["com";"NDNS";"DSK";"CERT";"1"]. *)
+(* Example data4 := data ["com";"NDNS";"DSK";"CERT";"1"] ["com";"NDNS";"KSK";"CERT";"1"]. *)
+(* Example data5 := data ["com";"NDNS";"KSK";"CERT";"1"] ["NDNS";"com";"DKEY";"CERT";"1"]. *)
+(* Example data6 := data ["NDNS";"com";"DKEY";"CERT";"1"] ["NDNS";"DSK";"CERT";"1"]. *)
+(* Example data7 := data ["NDNS";"DSK";"CERT";"1"] ["NDNS";"KSK";"CERT";"1"]. *)
+(* Example data8 := data ["NDNS";"KSK";"CERT";"1"] ["/usr/local/dns/key"]. *)
+(* Example dataR := wraped_data ["NDNS-R";"com";"ucla";"NDNS";"www";"NS";"v1";"s1"] ["/usr/local/mit/key"] data0. *)
+(* Example NdnsNet := [data0;data1;data2;data3;data4;data5;data6;data7;data8;dataR]. *)
 
-Example interpreterTest2 : interpr_main sampleProgramNdns 100 NdnsNet dataR = Some succ.
-Proof.
-  reflexivity.
-Qed.
+(* Example interpreterTest2 : interpr_main sampleProgramNdns 100 NdnsNet dataR = Some succ. *)
+(* Proof. *)
+(*   reflexivity. *)
+(* Qed. *)
+
+(* -----------------------end of example NDNS -------------------------------- *)
 
 Fixpoint exprLength (prog:Program) : nat :=
   match prog with
@@ -913,7 +889,6 @@ Fixpoint interpr_step (st:State) : State :=
       | false => state_finished keyNotMatch
       | true =>
         match act with
-        | actTryElse tr el => state_finished noMorePrefix
         | actRc (ruleCall nxtRn nxtPl) => match (genArgs indexed nxtPl) with
                                           | None => state_finished noMorePrefix
                                           | Some nxtArgs => (state progConst (getKey net dt) net (getExpr progConst nxtRn) nxtArgs 0)
