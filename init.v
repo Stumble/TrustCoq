@@ -742,7 +742,6 @@ Fixpoint interpr_follow (progConst:Program) (n:nat) (net:Network)
     end
   end.
 
-(* 当匹配时，目前先传n'，到时候再看是不是可以传更科学的数值，例如程序的最长环的长度 * name的长度？ *)
 Fixpoint interpr_findMatchRule (prog:Program) (data:Data) : option Expr :=
   match prog with
   | [] => None
@@ -892,8 +891,125 @@ Proof.
     + eauto.
 Qed.
 
+Inductive State : Type :=
+| state : Program -> Data -> Network -> Expr -> (list Name)-> nat -> State
+| state_finished : Rtn -> State.
+
+Inductive Rst : Type :=
+| unfinish
+| finished : Rtn -> Rst.
+
+Print Rst_ind.
+
+Fixpoint interpr_step (st:State) : State :=
+  match st with
+  | state_finished r => state_finished r
+  | state progConst dt net e args nStepAfterArgDeduction =>
+    let '(expr rname mp act) := e in
+    match isMatch (getName dt) mp with
+    | (false, _) => state_finished keyNotMatch
+    | (true, indexed) =>
+      match (argTest indexed args) with
+      | false => state_finished keyNotMatch
+      | true =>
+        match act with
+        | actTryElse tr el => state_finished noMorePrefix
+        | actRc (ruleCall nxtRn nxtPl) => match (genArgs indexed nxtPl) with
+                                          | None => state_finished noMorePrefix
+                                          | Some nxtArgs => (state progConst (getKey net dt) net (getExpr progConst nxtRn) nxtArgs 0)
+                                          end
+        | actAnchor addr => if beq_string addr (nameToString (getKeyLocator dt))
+                            then state_finished succ
+                            else state_finished authFail
+        | actOrAnchor pRule aRule =>
+          let '(ruleCall pRn pPl) := pRule in
+          let '(ruleCall aRn aPl) := aRule in
+          match (genArgs indexed pPl) with
+          (* this mean no more prefix, directly handover this packet to anchor rule *)
+          | None =>
+            (* (rtnDebugAny Data data) *)
+            match (genArgs indexed aPl) with
+            | None => state_finished noMorePrefix
+            | Some aArgs => state progConst dt net (getExpr progConst aRn) aArgs 0
+            end
+          | Some pArgs =>
+            (* Some (rtnDebugAny Data data) *)
+            state progConst (getKey net dt) net (getExpr progConst pRn) pArgs 0
+          end
+        end
+      end
+    end
+  end.
+
+Fixpoint getnPrefix (args: list Name) : nat :=
+  match args with
+  | [] => 0
+  | h::t => (List.length h)
+  end.
+  
+Fixpoint F (st:State) : nat :=
+  match st with
+  | (state prog dt net e args nStepAfterArgDeduction) =>
+    (List.length prog) * (getnPrefix args) - nStepAfterArgDeduction + (List.length prog)
+  | state_finished _ => 0
+  end.
+
+Print State_ind.
+
+Lemma boring : forall st st' prog prog' dt dt' net net' e e' args args' n n' rname mp act indexed,
+    (e = expr rname mp act) ->
+    (isMatch (getName dt) mp = (true, indexed)) ->
+    (argTest indexed args = true) ->
+    (st = state prog dt net e args n) -> (st' = state prog' dt' net' e' args' n')
+                              -> (interpr_step st = st') -> prog = prog'.
+  intros st st' prog prog' dt dt' net net' e e' args args' n n' rname mp act indexed.
+  intros Hexpr HisMatch HargTest Hst Hst' Hstep.
+  rewrite Hexpr in Hst.
+  rewrite Hst in Hstep.
+  unfold interpr_step in Hstep.
+  rewrite HisMatch in Hstep.
+  rewrite HargTest in Hstep.
+  destruct act.
+  + rewrite Hst' in Hstep.
+    inversion Hstep.
+  + 
+    Admitted.
+(*   (* destruct net. *) *)
+(*   (* unfold interpr_step in H1. *) *)
+(* (* | state : Program -> Data -> Network -> Expr -> (list Name)-> nat -> State *) *)
+(* (* | state_finished : Rtn -> State. *) *)
+
+(*   (* + destruct expr0 as [rname0 mp0 act0]. *) *)
+(* destruct (getName dt0) eqn:Heq1. *)
+(* destruct mp0. *)
+(* simpl in H1. *)
+(* destruct args0. *)
+(*   destruct expr0. *)
+(*   rewrite (xx indexed args0) in H1. *)
+(*   (* Case: st = prog0...nstep0 *) *)
+(*   + destruct expr0 as [rname0 mp0 act0]. destruct (getName dt0) eqn:Heq1. *)
+(*     destruct mp0. *)
+(*     - simpl in H1. destruct args0. destruct act0. *)
+(*       * rewrite H0 in H1. inversion H1. *)
+(*       * destruct r. destruct l. simpl in H1. rewrite H0 in H1. inversion H1. rewrite <- H3. rewrite H9. reflexivity. *)
+(*         destruct r0. destruct n0. simpl in H1.  *)
+(*         simpl in H1. *)
+  
+Lemma FzeroTerminate : forall st rtn,
+    F st = 0 -> interpr_step st = state_finished rtn.
+  
+Fixpoint interpr_step_main (n:nat) (st:State) : Rst :=
+  match n with
+  | 0 => unfinish
+  | S n' => let rst := interpr_step st in
+            match rst with
+            | state _ _ _ _ _ _ => interpr_step_main n' rst
+            | state_finished rtn => finished rtn
+            end
+  end.
+
 Lemma interpreterTerminate : forall prog net data,
-    noLoop prog = true -> hasAnchor prog = true -> satisfyLpp prog = true ->
+    noLoop prog = true -> hasAnchor prog = true ->
     exists i rval, interpr_main prog i net data = Some rval.
 Proof.
   intros.
