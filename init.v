@@ -931,7 +931,7 @@ Fixpoint F (st:State) : nat :=
 
 Print State_ind.
 
-Lemma boring : forall st st' prog prog' dt dt' net net' e e' args args' n n' rname mp act indexed,
+Lemma progUntouchedAfterStep: forall st st' prog prog' dt dt' net net' e e' args args' n n' rname mp act indexed,
     (e = expr rname mp act) ->
     (isMatch (getName dt) mp = (true, indexed)) ->
     (argTest indexed args = true) ->
@@ -944,32 +944,22 @@ Lemma boring : forall st st' prog prog' dt dt' net net' e e' args args' n n' rna
   unfold interpr_step in Hstep.
   rewrite HisMatch in Hstep.
   rewrite HargTest in Hstep.
-  destruct act.
-  + rewrite Hst' in Hstep.
-    inversion Hstep.
-  + 
-    Admitted.
-(*   (* destruct net. *) *)
-(*   (* unfold interpr_step in H1. *) *)
-(* (* | state : Program -> Data -> Network -> Expr -> (list Name)-> nat -> State *) *)
-(* (* | state_finished : Rtn -> State. *) *)
-
-(*   (* + destruct expr0 as [rname0 mp0 act0]. *) *)
-(* destruct (getName dt0) eqn:Heq1. *)
-(* destruct mp0. *)
-(* simpl in H1. *)
-(* destruct args0. *)
-(*   destruct expr0. *)
-(*   rewrite (xx indexed args0) in H1. *)
-(*   (* Case: st = prog0...nstep0 *) *)
-(*   + destruct expr0 as [rname0 mp0 act0]. destruct (getName dt0) eqn:Heq1. *)
-(*     destruct mp0. *)
-(*     - simpl in H1. destruct args0. destruct act0. *)
-(*       * rewrite H0 in H1. inversion H1. *)
-(*       * destruct r. destruct l. simpl in H1. rewrite H0 in H1. inversion H1. rewrite <- H3. rewrite H9. reflexivity. *)
-(*         destruct r0. destruct n0. simpl in H1.  *)
-(*         simpl in H1. *)
-  
+  rewrite Hst' in Hstep.
+  destruct act as [rc | rc1 rc2 | anchorStr ].
+  + destruct rc as [nxtRn nxtPl].
+    destruct (genArgs indexed nxtPl) eqn:Heq1.
+    - inversion Hstep. eauto.
+    - inversion Hstep.
+  + destruct rc1 as [pRn pPl].
+    destruct rc2 as [aRn aPl].
+    destruct (genArgs indexed pPl) eqn:Heq1.
+    - inversion Hstep. try eauto.
+    - destruct (genArgs indexed aPl) eqn:Heq2.
+      * inversion Hstep. try eauto.
+      * inversion Hstep.
+  + destruct (beq_string anchorStr (nameToString (getKeyLocator dt)));inversion Hstep.
+Qed.
+ 
 Lemma FzeroTerminate : forall st rtn,
     F st = 0 -> interpr_step st = state_finished rtn.
   
