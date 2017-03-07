@@ -99,7 +99,13 @@ Inductive Action : Type :=
 Inductive Expr : Type :=
   | expr : RuleName -> MatchPattern -> Action -> Expr.
 
+(* last nat is nToShrink *)
+Inductive ExprLabeled : Type :=
+  | exprl : RuleName -> MatchPattern -> Action -> option nat -> ExprLabeled.
+
 Definition Program := list Expr.
+
+Definition ProgramLabeled := list ExprLabeled.
 
 Example sampleRuleName: RuleName := ruleName "test".
 
@@ -221,6 +227,9 @@ Definition empty_name : Name := [""].
 Definition empty_data : Data := data empty_name empty_name.
 Definition empty_expr : Expr := (expr (ruleName "") []
                                       (actRc (ruleCall (ruleName "") []))).
+Definition empty_expr_labeled : ExprLabeled := (exprl (ruleName "") []
+                                               (actRc (ruleCall (ruleName "") []))
+                                               None).
 
 (* leave this part for later, right now, if not exist, just return False *)
 (* Fixpoint ruleDefined (nm:string) (prog:Program) := *)
@@ -649,6 +658,16 @@ Fixpoint getExpr (prog:Program) (name:RuleName) : Expr :=
             else getExpr t name
   end.
 
+Fixpoint getExprLabeled (prog:ProgramLabeled) (name:RuleName) : ExprLabeled :=
+  match prog with
+  | [] => empty_expr_labeled
+  | e::t => let '(exprl (ruleName ename) _ _ _) := e in
+            let '(ruleName rname) := name in
+            if beq_string ename rname
+            then e
+            else getExprLabeled t name
+  end.
+
 Example getExprTest1 : getExpr sampleProgram5 (ruleName ".com") = (expr (ruleName ".com") [] (actAnchor "/usr/local/key1")).
 Proof.
   reflexivity.
@@ -838,8 +857,61 @@ Qed.
 Fixpoint exprLength (prog:Program) : nat :=
   match prog with
   | [] => 0
-  | h::t => Nat.add 1 (exprLength t)
+  | h::t => S (exprLength t)
   end.
+
+(* Inductive Action : Type := *)
+(* (* TryElse is temporarily removed, it introduces too much problems when proofing *) *)
+(* (* | actTryElse       : RuleCall -> RuleCall -> Action *) *)
+(* (* try expr1, if authentication failed, unwrap data and try Rule *) *)
+(* | actRc            : RuleCall -> Action *)
+(* | actOrAnchor      : RuleCall -> RuleCall -> Action *)
+(* | actAnchor        : string -> Action. *)
+
+Definition exprInitLabel (expr:Expr) : ExprLabeled :=
+  let '(expr rname mp act) := expr in
+  (exprl rname mp act None).
+
+Definition progInitLabel (prog:Program) : ProgramLabeled :=
+  map exprInitLabel prog.
+
+Fixpoint caculateExprLabel (prog:ProgramLabeled) (expr:ExprLabeled) : ExprLabeled :=
+  let '(exprl rname mp act label) := expr in
+  match act with
+  | actRc (ruleCall nxtRn nxtPl) => if (hasPrefix nxtPl)
+                                    then exprl rname mp act (Some 0)
+                                    else let nxtExpr := (getExprLabeled prog nxtRn) in
+                                         let '(exprl _ _ _ nxtLabel) := nxtExpr in
+                                         match nxtLabel with
+                                         | None => exprl rname mp act None
+                                         | Some n' => exprl rname mp act (Some (S n'))
+                                         end
+  | actAnchor addr => exprl rname mp act (Some 0)
+  | actOrAnchor pRule aRule =>
+    let '(ruleCall pRn pPl) := pRule in
+    if (hasPrefix pPl)
+    then exprl rname mp act (Some 0)
+    else let nxtExpr := (getExprLabeled prog pRn) in
+         let '(exprl _ _ _ pLabel) := nxtExpr in
+         match pLabel with
+         | None => exprl rname mp act None
+         | Some n' => exprl rname mp act (Some (S n'))
+         end
+  end.
+
+Fixpoint iterativeLabel (n:nat) (prog:ProgramLabeled) : ProgramLabeled :=
+  match n with
+  | 0 => prog
+  | S n' => let tmp := (map (caculateExprLabel prog) prog) in
+            iterativeLabel n' tmp
+  end.
+
+Fixpoint labelProgram (prog:Program) : ProgramLabeled :=
+  let n := List.length prog in
+  let progLabeled := (progInitLabel prog) in
+  iterativeLabel n progLabeled.
+
+Compute (labelProgram sampleProgram6).
 
 Fixpoint similarFindMatch (n:nat) (l:list nat) (target:nat) : option bool :=
   match n with
@@ -877,10 +949,13 @@ Inductive Rst : Type :=
 
 Print Rst_ind.
 
+(* Lemma checked : (check prog) -> (forall expr prog) -> (expr in progConst) *)
+(*                 -> either expr.act = anchor -> hasPrefix expr.act *)
+
 Fixpoint interpr_step (st:State) : State :=
   match st with
   | state_finished r => state_finished r
-  | state progConst dt net e args nStepAfterArgDeduction =>
+  | state progConst dt net e args n =>
     let '(expr rname mp act) := e in
     match isMatch (getName dt) mp with
     | (false, _) => state_finished keyNotMatch
@@ -891,7 +966,7 @@ Fixpoint interpr_step (st:State) : State :=
         match act with
         | actRc (ruleCall nxtRn nxtPl) => match (genArgs indexed nxtPl) with
                                           | None => state_finished noMorePrefix
-                                          | Some nxtArgs => (state progConst (getKey net dt) net (getExpr progConst nxtRn) nxtArgs 0)
+                                          | Some nxtArgs => (state progConst (getKey net dt) net (getExpr progConst nxtRn) nxtArgs (S n))
                                           end
         | actAnchor addr => if beq_string addr (nameToString (getKeyLocator dt))
                             then state_finished succ
@@ -959,10 +1034,31 @@ Lemma progUntouchedAfterStep: forall st st' prog prog' dt dt' net net' e e' args
       * inversion Hstep.
   + destruct (beq_string anchorStr (nameToString (getKeyLocator dt)));inversion Hstep.
 Qed.
+
+Lemma prefix0Terminate : forall rtn prog data net expr args n,
+    getnPrefix args = 0 -> n = 0 ->
+    interpr_step (state prog data net expr args n) = state_finished rtn.
+Admitted.
+
+Lemma stepNltProgLength : forall prog prog' dt dt' net net' e e' args args' n n',
+    interpr_step (state prog dt net e args n) = (state prog' dt' net' e' args' n') -> n' <= (List.length prog).
+Admitted.
  
 Lemma FzeroTerminate : forall st rtn,
     F st = 0 -> interpr_step st = state_finished rtn.
-  
+  intros st rtn.
+  destruct st as [prog data net expr args n | rt].
+  + intros Hfst0.
+    unfold F in Hfst0.
+    remember (length prog) as proglength.
+    remember (getnPrefix args) as prefixlength.
+    induction n.
+    (* n = 0, then either progLength = 0 or prefix = 0 *)
+    - induction prefixlength.
+      * apply prefix0Terminate. auto. auto.
+      * 
+
+ 
 Fixpoint interpr_step_main (n:nat) (st:State) : Rst :=
   match n with
   | 0 => unfinish
