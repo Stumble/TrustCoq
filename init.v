@@ -1141,6 +1141,9 @@ Admitted.
 (* | state_finished : Rtn -> State. *)
 
 (* Lemma *)
+(* This one has a almost same proof above
+   but only some conditions are changed so that it
+   is easier to use. *)
 Lemma step_prog_equal :
   forall st prog dt net e a st' p' d' n' e' a',
     st = state prog dt net e a ->
@@ -1148,6 +1151,33 @@ Lemma step_prog_equal :
     interpr_step st = st' ->
     prog = p'.
   Admitted.
+
+Fixpoint hasPrefixRc (rc:RuleCall) : bool :=
+  match rc with
+  | ruleCall rn pl => hasPrefix pl
+  end.
+
+Inductive hasPrefixOrAnchor :
+  Action -> Prop :=
+  | hpa_anchor : forall str act, act = actAnchor str -> hasPrefixOrAnchor act 
+  | hpa_actRc : forall rc act, (hasPrefixRc rc = true) -> act = actRc rc -> hasPrefixOrAnchor act
+  | hpa_actOrAnchor : forall rc1 rc2 act, (hasPrefixRc rc1 = true) -> act = actOrAnchor rc1 rc2 -> hasPrefixOrAnchor act.
+
+Lemma labeled_prog_args_shrink_step:
+  forall st prog dt net e args rn mp act n,
+    st = state prog dt net e args ->
+    e = exprl rn mp act n ->
+    ( (n = 0 /\ hasPrefixOrAnchor act)
+      \/
+      exists e' rn' mp' act' n', e' = exprl rn' mp' act' n' ->
+                                 e' = (getExpr prog rn) ->
+                                 n' < n).
+Admitted.
+
+(* forall st prog dt net e a, *)
+(*   st = state prog dt net e a -> *)
+(*   st *)
+    
 
 Lemma step_args_smaller :
   forall st prog dt net e a st' p' d' n' e' a' rn mp act n2s
@@ -1160,7 +1190,36 @@ Lemma step_args_smaller :
     ((n2s = 0 /\ (getNPrefix a' < getNPrefix a))
      \/
      (n2s' < n2s /\ (getNPrefix a' <= getNPrefix a))).
-  intros.
+(*   intros st prog dt net *)
+(*   rn' mp' act' n2s'. *)
+(*   intros Hst Hst' He He' Hstep. *)
+(*   rewrite He in Hst. *)
+(*   (* destruct e as [rn mp act n2s] eqn:Hexpr. *) *)
+(*   rewrite Hst in Hstep. *)
+(*   unfold interpr_step in Hstep. *)
+(*   destruct (isMatch (getName dt) mp) as [b indexed] eqn:HisMatch. *)
+(*   destruct b. *)
+  
+(*   + (* isMatch = true Case *) *)
+(*     destruct (argTest indexed a) eqn:HargTest. *)
+(*     - (* argTest true Case *) *)
+(*       destruct act as [rc | rc1 rc2 | anchorStr ] eqn:HeqAct. *)
+(*       * destruct rc as [nxtRn nxtPl] eqn:HeqRc. *)
+(*         destruct (genArgs indexed nxtPl) eqn:HeqGenArgs. *)
+(*         rewrite Hst' in Hstep. *)
+(*         inversion Hstep. *)
+(* labeled_prog_args_shrink_step. *)
+(*         (* to do a case analysis on e's value for the below goal, *)
+(*          use it like this:*) *)
+(*         (* apply testWrong in He. *) *)
+(*         (* inversion He. *) *)
+(*         (* a' = l <= indexed, because genArgs *) *)
+(*         (* e either has n2s = 0 /\ hasPrefix act *)
+(*              or     has (getExpr prog nxtRn)'s n2s_gen < n2s *)
+(* *) *)
+      
+      
+
 Admitted.
 
   (* pl * getNPrefix a' + 0 <= pl * getNPrefix a + n2s' - 1 *)
@@ -1240,11 +1299,6 @@ Proof.
 Qed.
 
 
-   
-   
-                                                                           
-Admitted.
-
 Lemma step_result : forall st prog dt net e args st',
     (st = state prog dt net e args) ->
     (interpr_step st = st') ->
@@ -1259,12 +1313,15 @@ Proof.
   intros Hstep.
   destruct (interpr_step st) as [p' d' n' e' a' | r'] eqn:HeqRtn.
   + symmetry in Hstep. right. intros.
-    apply step_cont_le with (p:=p') (d:=d') (n:=n') (e:=e') (a:=a').
+(* st prog dt net e a st' p' d' n' e' a', *)
+
+    apply step_cont_le with
+    (prog:=prog) (dt:=dt) (net:=net) (e:=e) (a:=args)
+    (p':=p') (d':=d') (n':=n') (e':=e') (a':=a').
     repeat eauto. rewrite <- Hstep in HeqRtn. eauto.
+    rewrite <- Hstep in HeqRtn. eauto.
   + left. eauto.
 Qed.
-  
-                           
 
 Lemma another : forall st st' n,
     (interpr_multi_step n st = st') ->
