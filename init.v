@@ -6,7 +6,7 @@ Require Import Strlib.
 Require Import Notations Logic Datatypes.
 Require Export Setoid.
 Require Import LibTactics.
-
+Require Import Coq.omega.Omega.
 
 Import ListNotations.
 
@@ -1161,23 +1161,102 @@ Inductive hasPrefixOrAnchor :
   Action -> Prop :=
   | hpa_anchor : forall str act, act = actAnchor str -> hasPrefixOrAnchor act 
   | hpa_actRc : forall rc act, (hasPrefixRc rc = true) -> act = actRc rc -> hasPrefixOrAnchor act
-  | hpa_actOrAnchor : forall rc1 rc2 act, (hasPrefixRc rc1 = true) -> act = actOrAnchor rc1 rc2 -> hasPrefixOrAnchor act.
+  | hpa_actOrAnchor : forall rc1 rc2 act, (hasPrefixRc rc1 = true) -> (hasPrefixRc rc2 = true) -> act = actOrAnchor rc1 rc2 -> hasPrefixOrAnchor act.
 
-Lemma labeled_prog_args_shrink_step:
-  forall st prog dt net e args rn mp act n,
+(* Lemma labeled_prog_args_shrink_step: *)
+(*   forall st prog dt net e args rn mp act n, *)
+(*     st = state prog dt net e args -> *)
+(*     e = exprl rn mp act n -> *)
+(*     ( (n = 0 /\ hasPrefixOrAnchor act) *)
+(*       \/ *)
+(*       (forall e' rn' mp' act' n', e' = exprl rn' mp' act' n' -> *)
+(*                                  e' = (getExpr prog rn) -> *)
+(*                                  n' < n) *)
+(*     ). *)
+(* Admitted. *)
+
+Lemma labeled_prog_args_shrink_rc:
+  forall st prog dt net e args rn mp act n nxtRn nxtPl,
     st = state prog dt net e args ->
     e = exprl rn mp act n ->
+    act = actRc (ruleCall nxtRn nxtPl) ->
     ( (n = 0 /\ hasPrefixOrAnchor act)
       \/
-      exists e' rn' mp' act' n', e' = exprl rn' mp' act' n' ->
-                                 e' = (getExpr prog rn) ->
-                                 n' < n).
+      (forall e' rn' mp' act' n', e' = exprl rn' mp' act' n' ->
+                                 e' = (getExpr prog nxtRn) ->
+                                 n' < n)
+    ).
+Proof.
+  Admitted.
+
+Lemma labeled_prog_args_shrink_or:
+  forall st prog dt net e args rn mp act n nxtRn1 nxtPl1 nxtRn2 nxtPl2,
+    st = state prog dt net e args ->
+    e = exprl rn mp act n ->
+    act = actOrAnchor (ruleCall nxtRn1 nxtPl1)
+                      (ruleCall nxtRn2 nxtPl2)->
+    ( (n = 0 /\ hasPrefixOrAnchor act)
+      \/
+      (forall e' rn' mp' act' n',
+          e' = exprl rn' mp' act' n' ->
+          ((e' = (getExpr prog nxtRn1)) \/ e' = (getExpr prog nxtRn2)) ->
+          n' < n)
+    ).
+Proof.
+  Admitted.
+
+
+(* if argTest indexed a = true *)
+(*    getNPrefix indexed <= getNPrefix a *)
+Lemma argTest_le : forall indexed args,
+    argTest indexed args = true ->
+    getNPrefix indexed <= getNPrefix args.
+Proof.
 Admitted.
+
+
+
+Lemma genArgs_lt_if_prefix : forall indexed nxtPl l,
+    (genArgs indexed nxtPl = Some l) ->
+    (hasPrefix nxtPl = true) ->
+    (getNPrefix l < getNPrefix indexed).
+Proof.
+Admitted.
+
+Lemma genArgs_le : forall indexed nxtPl l,
+    (genArgs indexed nxtPl = Some l) ->
+    (getNPrefix l <= getNPrefix indexed).
+Proof.
+Admitted.
+
+Lemma mathBasic_lelt : forall a b c,
+    a < b ->
+    b <= c ->
+    a < c.
+Proof.
+  intros.
+  omega.
+Qed.
+
+Lemma hasPrefixOrAnchor_on_nxtPl :
+  forall actRc nxtRn nxtPl,
+    (hasPrefixOrAnchor (actRc (ruleCall nxtRn nxtPl))) ->
+    hasPrefix nxtPl = true.
+Proof.
+Admitted.
+
+Lemma hasPrefixOrAnchor_on_all_nxtPl :
+  forall nxtRn1 nxtPl1 nxtRn2 nxtPl2,
+    (hasPrefixOrAnchor (actOrAnchor (ruleCall nxtRn1 nxtPl1)
+                                    (ruleCall nxtRn2 nxtPl2))) ->
+    (hasPrefix nxtPl1 = true) /\ (hasPrefix nxtPl2 = true).
+Proof.
+Admitted.
+
 
 (* forall st prog dt net e a, *)
 (*   st = state prog dt net e a -> *)
 (*   st *)
-    
 
 Lemma step_args_smaller :
   forall st prog dt net e a st' p' d' n' e' a' rn mp act n2s
@@ -1190,35 +1269,143 @@ Lemma step_args_smaller :
     ((n2s = 0 /\ (getNPrefix a' < getNPrefix a))
      \/
      (n2s' < n2s /\ (getNPrefix a' <= getNPrefix a))).
-(*   intros st prog dt net *)
-(*   rn' mp' act' n2s'. *)
-(*   intros Hst Hst' He He' Hstep. *)
-(*   rewrite He in Hst. *)
-(*   (* destruct e as [rn mp act n2s] eqn:Hexpr. *) *)
-(*   rewrite Hst in Hstep. *)
-(*   unfold interpr_step in Hstep. *)
-(*   destruct (isMatch (getName dt) mp) as [b indexed] eqn:HisMatch. *)
-(*   destruct b. *)
+  intros
+    st prog dt net e a st' p' d' n' e' a' rn mp act n2s
+    rn' mp' act' n2s'.
+  intros Hst Hst' He He' Hstep.
+  assert (Hshrink := Hst).
+  (* apply labeled_prog_args_shrink_step with *)
+  (*   (rn:=rn) (mp:=mp) (act:=act) (n:=n2s)in Hshrink. *)
+  (* Focus 2. eauto. *)
+  rewrite He in Hst.
+  (* destruct e as [rn mp act n2s] eqn:Hexpr. *)
+  rewrite Hst in Hstep.
+  unfold interpr_step in Hstep.
+  destruct (isMatch (getName dt) mp) as [b indexed] eqn:HisMatch.
+  destruct b.
   
-(*   + (* isMatch = true Case *) *)
-(*     destruct (argTest indexed a) eqn:HargTest. *)
-(*     - (* argTest true Case *) *)
-(*       destruct act as [rc | rc1 rc2 | anchorStr ] eqn:HeqAct. *)
-(*       * destruct rc as [nxtRn nxtPl] eqn:HeqRc. *)
-(*         destruct (genArgs indexed nxtPl) eqn:HeqGenArgs. *)
-(*         rewrite Hst' in Hstep. *)
-(*         inversion Hstep. *)
-(* labeled_prog_args_shrink_step. *)
-(*         (* to do a case analysis on e's value for the below goal, *)
-(*          use it like this:*) *)
-(*         (* apply testWrong in He. *) *)
-(*         (* inversion He. *) *)
-(*         (* a' = l <= indexed, because genArgs *) *)
-(*         (* e either has n2s = 0 /\ hasPrefix act *)
-(*              or     has (getExpr prog nxtRn)'s n2s_gen < n2s *)
-(* *) *)
-      
-      
+  + (* isMatch = true Case *)
+    destruct (argTest indexed a) eqn:HargTest.
+    - (* argTest true Case *)
+      destruct act as [rc | rc1 rc2 | anchorStr ] eqn:HeqAct.
+      * (* act = actRc rc Case*)
+        destruct rc as [nxtRn nxtPl] eqn:HeqRc.
+        apply labeled_prog_args_shrink_rc with
+        (rn:=rn) (mp:=mp) (act:=act) (n:=n2s)
+                 (nxtRn:=nxtRn) (nxtPl:=nxtPl) in Hshrink.
+        (* solving trivial goals *)
+        Focus 2. eauto. rewrite <- HeqAct in He. eauto.
+        Focus 2. eauto.
+        destruct (genArgs indexed nxtPl) eqn:HeqGenArgs.
+        ++
+          (* genArgs indexed nxtPl = (true, l) *)
+        rewrite Hst' in Hstep.
+        inversion Hshrink as [Hn2s0 | Hn2sS].
+          -- left. inversion Hn2s0. split. eauto.
+             apply argTest_le in HargTest. (* ! *)
+             apply genArgs_lt_if_prefix in HeqGenArgs.
+             inversion Hstep.
+             rewrite H6 in HeqGenArgs.
+             omega.
+             rewrite HeqAct in H0.
+             apply hasPrefixOrAnchor_on_nxtPl in H0.
+             eauto.
+          -- right. split.
+             apply Hn2sS with
+             (e':=e') (rn':=rn')
+                      (mp':=mp') (act':=act').
+             eauto. inversion Hstep. eauto. eauto.
+             inversion Hstep.
+             rewrite <- H4.
+             apply argTest_le in HargTest.
+             apply genArgs_le in HeqGenArgs.
+             omega.
+        ++ (* genArgs indexed nxtPl = None *)
+          rewrite Hst' in Hstep.
+          inversion Hstep.
+      * (* act = act = actOrAnchor rc1 rc2*)
+        destruct rc1 as [nxtRn1 nxtPl1] eqn:Heqrc1.
+        destruct rc2 as [nxtRn2 nxtPl2] eqn:Heqrc2.
+        apply labeled_prog_args_shrink_or with
+        (rn:=rn) (mp:=mp) (act:=act) (n:=n2s)
+                 (nxtRn1:=nxtRn1) (nxtPl1:=nxtPl1)
+                 (nxtRn2:=nxtRn2) (nxtPl2:=nxtPl2)  in Hshrink.
+        Focus 2. rewrite <- HeqAct in He. eauto.
+        Focus 2. eauto.
+        destruct (genArgs indexed nxtPl1) eqn:HeqGenArgs.
+        ++ (* genArgs indexed nxtPl1 = (true, l) *)
+          eauto.
+          inversion Hshrink as [Hn2s0 | Hn2sS].
+          -- left. inversion Hn2s0. split. eauto.
+             apply argTest_le in HargTest. (* ! *)
+             apply genArgs_lt_if_prefix in HeqGenArgs.
+             rewrite Hst' in Hstep.
+             inversion Hstep.
+             rewrite H6 in HeqGenArgs.
+             omega.
+             rewrite HeqAct in H0.
+             apply hasPrefixOrAnchor_on_all_nxtPl in H0.
+             inversion H0.
+             eauto.
+          -- right.
+             split.
+             apply Hn2sS with
+             (e':=e') (rn':=rn')
+                      (mp':=mp') (act':=act').
+             eauto. inversion Hstep. eauto. eauto.
+             left.
+             rewrite Hst' in Hstep.
+             inversion Hstep.
+             eauto.
+             apply argTest_le in HargTest.
+             apply genArgs_le in HeqGenArgs.
+             rewrite Hst' in Hstep.
+             inversion Hstep.
+             rewrite <- H4.
+             omega.
+        ++ (* genArgs indexed nxtPl1 = (false, l) *)
+          eauto.
+          destruct (genArgs indexed nxtPl2) eqn:HeqGenArgs2.
+          -- (* genArgs2 = some l*)
+          rewrite Hst' in Hstep.
+          inversion Hshrink as [Hn2s0 | Hn2sS].
+            ** left. inversion Hn2s0. split. eauto.
+             apply argTest_le in HargTest. (* ! *)
+             apply genArgs_lt_if_prefix in HeqGenArgs2.
+             inversion Hstep.
+             rewrite <- H6.
+             omega.
+             rewrite HeqAct in H0.
+             apply hasPrefixOrAnchor_on_all_nxtPl in H0.
+             inversion H0.
+             eauto.
+            ** right.
+               split.
+               apply Hn2sS with
+               (e':=e') (rn':=rn')
+                        (mp':=mp') (act':=act').
+               eauto. right. inversion Hstep. eauto. 
+               apply argTest_le in HargTest.
+               apply genArgs_le in HeqGenArgs2.
+               inversion Hstep.
+               rewrite <- H4.
+               omega.
+          -- (* genArgs2 None *)
+            rewrite Hst' in Hstep. inversion Hstep.
+      * rewrite Hst' in Hstep.
+        destruct (beq_string anchorStr (nameToString (getKeyLocator dt))).
+        ++ inversion Hstep.
+        ++ inversion Hstep.
+    - rewrite Hst' in Hstep.
+      inversion Hstep.
+  + (* isMatch false *)
+    rewrite Hst' in Hstep.
+    inversion Hstep.
+Qed.
+
+
+
+
 
 Admitted.
 
