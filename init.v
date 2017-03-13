@@ -1403,14 +1403,6 @@ Lemma step_args_smaller :
     inversion Hstep.
 Qed.
 
-
-
-
-
-Admitted.
-
-  (* pl * getNPrefix a' + 0 <= pl * getNPrefix a + n2s' - 1 *)
-
 Lemma mathBasic1 :
   forall A B C D,
     (B < D) ->
