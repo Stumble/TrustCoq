@@ -1214,7 +1214,18 @@ Lemma argTest_le : forall indexed args,
 Proof.
 Admitted.
 
+Lemma progLengthLt0 : forall st prog dt net e args,
+    (st = state prog dt net e args) ->
+    ( length prog > 0).
+Proof.
+Admitted.
 
+Lemma prefixZeroTerminate : forall st prog dt net e args,
+    (st = state prog dt net e args) ->
+    (getNPrefix args = 0) ->
+    exists rtn, interpr_step st = state_finished rtn.
+Proof.
+Admitted.
 
 Lemma genArgs_lt_if_prefix : forall indexed nxtPl l,
     (genArgs indexed nxtPl = Some l) ->
@@ -1417,6 +1428,14 @@ Lemma mathBasic2 :
     A * B + C <= A * D + E - 1.
 Admitted.
 
+Lemma mathBasic3 :
+  forall A B C,
+    (A > 0) ->
+    (A * B + C) = 0 ->
+    (C = 0 /\ B = 0).
+Proof.
+  intros.
+Admitted.
 
 Lemma labelLtProgLength :
   forall st prog dt net e a rn mp act n2s,
@@ -1502,11 +1521,30 @@ Proof.
   + left. eauto.
 Qed.
 
+Lemma FzeroTerminate : forall st,
+    F st = 0 -> (exists rtn, interpr_step st = state_finished rtn).
+  intros st Hfst0.
+  destruct st as [prog data net expr args | rt] eqn:HeqSt.
+  +
+    unfold F in Hfst0.
+    destruct expr as [rn mp act] eqn:HeqExpr.
+    apply mathBasic3 in Hfst0.
+    Focus 2. apply progLengthLt0 with (st:=st)
+    (dt:=data) (net:=net) (e:=expr) (args:=args).
+    rewrite <- HeqExpr in HeqSt. eauto.
+    inversion Hfst0.
+    rewrite <- HeqExpr in HeqSt.
+    rewrite <- HeqExpr.
+    rewrite <- HeqSt.
+    apply prefixZeroTerminate with (st:=st) (prog:=prog)
+             (dt:=data) (net:=net) (e:=expr) (args:=args).
+    eauto. eauto.
+  + simpl. eauto.
+Qed.
+
 Lemma another : forall st st' n,
     (interpr_multi_step n st = st') ->
     (interpr_step st' = finished).
-  
-
 
 Lemma stepTerm : forall st st',
     (exists n, interpr_multi_step n st = st')
