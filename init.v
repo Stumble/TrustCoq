@@ -10,7 +10,6 @@ Require Import Coq.omega.Omega.
 
 Import ListNotations.
 
-
 Definition NameComp := string.
 
 Definition Name := list NameComp.
@@ -977,9 +976,6 @@ Fixpoint similarFindMatch (n:nat) (l:list nat) (target:nat) : option bool :=
             end
   end.
 
-(* Arguments similarFindMatch n l target: simpl never. *)
-(* Arguments Nat.add n m: simpl never. *)
-(* Arguments Nat.add n m : simpl never. *)
 Lemma similarProofTerminate : forall l target,
     exists nStep rtn, similarFindMatch nStep l target = Some rtn.
 Proof.
@@ -1053,22 +1049,6 @@ Fixpoint F (st:State) : nat :=
     (List.length prog) * (getNPrefix args) + n
   | state_finished _ => 0
   end.
-(* n < List.length prog, easy too proof *)
-
-Print State_ind.
-(* Lemma step2Smaller : forall st st' prog prog' dt dt' net net' e e' args args' *)
-(*                             rn rn' mp mp' act act' nToShrink nToShrink', *)
-
-(*     (st = state prog dt net e args) -> *)
-(*     (st' = state prog' dt' net' e' args') -> *)
-(*     (interpr_step st = st') -> *)
-(*     (e = exprl rn mp act nToShrink) ->  *)
-(*     (e' = exprl rn' mp' act' nToShrink') -> *)
-(*     ((nToShrink = 0 /\ (getNPrefix args' < getNPrefix args)) *)
-(*      \/ *)
-(*      (nToShrink' < nToShrink /\ (getNPrefix args' <= getNPrefix args)) *)
-(*     ). *)
-(* Admitted. *)
 
 Lemma progUntouchedAfterStep: forall st st' prog prog' dt dt' net net' e e' args args' rname mp act nToShrink indexed,
     (e = exprl rname mp act nToShrink) ->
@@ -1099,7 +1079,6 @@ Lemma progUntouchedAfterStep: forall st st' prog prog' dt dt' net net' e e' args
   + destruct (beq_string anchorStr (nameToString (getKeyLocator dt)));inversion Hstep.
 Qed.
 
-
 Fixpoint interpr_step_main (n:nat) (st:State) : Rst :=
   match n with
   | 0 => unfinish
@@ -1114,15 +1093,11 @@ Lemma Flt0 : forall st x,
     (F st = x) -> (x > 0).
 Admitted.
 
-Lemma Fst1 : forall st n,
-    (F st = 1) -> (exists r, interpr_step_main n st = finished r).
-Admitted.
-
 Lemma stepFstlt0 : forall st prog dt net e args,
     (interpr_step st = state prog dt net e args) ->
     (F st) > 0.
 Admitted.
-  (* Heqst : interpr_step st = state p d n e l *)
+
 Lemma stepFinish : forall st st' prog data net e args,
     (st' = state prog data net e args) ->
     (interpr_step st = st') ->
@@ -1163,18 +1138,6 @@ Inductive hasPrefixOrAnchor :
   | hpa_actRc : forall rc act, (hasPrefixRc rc = true) -> act = actRc rc -> hasPrefixOrAnchor act
   | hpa_actOrAnchor : forall rc1 rc2 act, (hasPrefixRc rc1 = true) -> (hasPrefixRc rc2 = true) -> act = actOrAnchor rc1 rc2 -> hasPrefixOrAnchor act.
 
-(* Lemma labeled_prog_args_shrink_step: *)
-(*   forall st prog dt net e args rn mp act n, *)
-(*     st = state prog dt net e args -> *)
-(*     e = exprl rn mp act n -> *)
-(*     ( (n = 0 /\ hasPrefixOrAnchor act) *)
-(*       \/ *)
-(*       (forall e' rn' mp' act' n', e' = exprl rn' mp' act' n' -> *)
-(*                                  e' = (getExpr prog rn) -> *)
-(*                                  n' < n) *)
-(*     ). *)
-(* Admitted. *)
-
 Lemma labeled_prog_args_shrink_rc:
   forall st prog dt net e args rn mp act n nxtRn nxtPl,
     st = state prog dt net e args ->
@@ -1205,18 +1168,22 @@ Lemma labeled_prog_args_shrink_or:
 Proof.
   Admitted.
 
-
-(* if argTest indexed a = true *)
-(*    getNPrefix indexed <= getNPrefix a *)
-Lemma argTest_le : forall indexed args,
-    argTest indexed args = true ->
-    getNPrefix indexed <= getNPrefix args.
+Lemma progLengthLt0 : forall st prog dt net e args,
+    (st = state prog dt net e args) ->
+    (length prog > 0).
 Proof.
 Admitted.
 
-Lemma progLengthLt0 : forall st prog dt net e args,
-    (st = state prog dt net e args) ->
-    ( length prog > 0).
+Lemma labelLtProgLength :
+  forall st prog dt net e a rn mp act n2s,
+    st = state prog dt net e a ->
+    e = exprl rn mp act n2s ->
+    n2s <= List.length prog.
+Admitted.
+
+Lemma argTest_le : forall indexed args,
+    argTest indexed args = true ->
+    getNPrefix indexed <= getNPrefix args.
 Proof.
 Admitted.
 
@@ -1262,6 +1229,43 @@ Lemma hasPrefixOrAnchor_on_all_nxtPl :
                                     (ruleCall nxtRn2 nxtPl2))) ->
     (hasPrefix nxtPl1 = true) /\ (hasPrefix nxtPl2 = true).
 Proof.
+Admitted.
+
+Lemma mathNatZero :
+  forall a b,
+    (a + b = 0) ->
+    a = 0 /\ b = 0.
+Proof.
+  intros.
+  omega.
+Qed.
+
+Lemma mathBasic1 :
+  forall A B C D,
+    (B < D) ->
+    (C <= A) ->
+    A * B + C <= A * D + 0 - 1.
+Admitted.
+
+Lemma mathBasic2 :
+  forall A B C D E,
+    B <= D ->
+    C < E ->
+    A * B + C <= A * D + E - 1.
+Admitted.
+
+Lemma mathBasic3 :
+  forall A B C,
+    (A > 0) ->
+    (A * B + C) = 0 ->
+    (C = 0 /\ B = 0).
+Proof.
+  intros.
+  split.
+  induction C. eauto. 
+  apply mathNatZero in H0.
+  induction A. inversion H.
+  apply IHA. inversion H.
 Admitted.
 
 
@@ -1414,36 +1418,6 @@ Lemma step_args_smaller :
     inversion Hstep.
 Qed.
 
-Lemma mathBasic1 :
-  forall A B C D,
-    (B < D) ->
-    (C <= A) ->
-    A * B + C <= A * D + 0 - 1.
-Admitted.
-
-Lemma mathBasic2 :
-  forall A B C D E,
-    B <= D ->
-    C < E ->
-    A * B + C <= A * D + E - 1.
-Admitted.
-
-Lemma mathBasic3 :
-  forall A B C,
-    (A > 0) ->
-    (A * B + C) = 0 ->
-    (C = 0 /\ B = 0).
-Proof.
-  intros.
-Admitted.
-
-Lemma labelLtProgLength :
-  forall st prog dt net e a rn mp act n2s,
-    st = state prog dt net e a ->
-    e = exprl rn mp act n2s ->
-    n2s <= List.length prog.
-Admitted.
-
 Lemma step_cont_le :
   forall st prog dt net e a st' p' d' n' e' a',
     st = state prog dt net e a ->
@@ -1511,8 +1485,6 @@ Proof.
   intros Hstep.
   destruct (interpr_step st) as [p' d' n' e' a' | r'] eqn:HeqRtn.
   + symmetry in Hstep. right. intros.
-(* st prog dt net e a st' p' d' n' e' a', *)
-
     apply step_cont_le with
     (prog:=prog) (dt:=dt) (net:=net) (e:=e) (a:=args)
     (p':=p') (d':=d') (n':=n') (e':=e') (a':=a').
@@ -1542,100 +1514,6 @@ Lemma FzeroTerminate : forall st,
   + simpl. eauto.
 Qed.
 
-Lemma another : forall st st' n,
-    (interpr_multi_step n st = st') ->
-    (interpr_step st' = finished).
-
-Lemma stepTerm : forall st st',
-    (exists n, interpr_multi_step n st = st')
-    ->
-    (exists rtn, interpr_step st' = state_finished rtn).
-  intros.
-  exfalso.
-(*     (exists n st' rtn, *)
-(*         (interpr_multi_step n st = st') *)
-(*         /\ *)
-(*         (interpr_step st' = state_finished rtn) *)
-(*     ). *)
-(* Proof. *)
-(*   intros. *)
-(*   exists (F st). *)
-(*   exfalso. *)
-
-
-Lemma interpreterTerminate2 : forall st,
-    exists n rtn, interpr_step_main n st = finished rtn.
-Proof.
-  intros.
-  eexists (S (F st)).
-  unfold interpr_step_main.
-  fold interpr_step_main.
-  destruct (interpr_step st) eqn:Heqst.
-  +
-    remember (state p d n e l) as st'.
-    apply stepFinish with (prog:=p) (data:=d)
-                     (net:=n) (e:=e) (args:=l). eauto. eauto.
-  + eauto.
-Qed.
-  induction (S (F st)) eqn:HeqFst.
-  + inversion HeqFst.
-  + destruct (interpr_step st) eqn:HeqSt.
-    - 
-
-
-    fold interpr_step_main.
-    destruct (interpr_step st) as [prog' dt' net' e' args'|rtn'] eqn:Heq1. remember (state prog' dt' net' e' args') as st'.
-    induction n.
-    - apply (Fst1 st 0) in HeqFst.
-      apply HeqFst.
-    - rewrite Heqst'. unfold interpr_step_main. 
-      fold interpr_step_main. rewrite <- Heqst'.
-    (* F st' < F st *)
-    (* F st = S n, i.e., n < S n *)
-
-Admitted.
-
-(* If F st' = F st, st ==> st', then st' = st = state_finished *)
-
-Lemma test : forall n st rtn,
-    (n >= (F st)) -> interpr_step_main n st = finished rtn.
-
-(* Lemma prefix0Terminate : forall rtn prog data net expr args n, *)
-(*     getNPrefix args = 0 -> n = 0 -> *)
-(*     interpr_step (state prog data net expr args) = state_finished rtn. *)
-(* Admitted. *)
-
-(* Lemma stepNltProgLength : forall prog prog' dt dt' net net' e e' args args' n n', *)
-(*     interpr_step (state prog dt net e args) = (state prog' dt' net' e' args' n') -> n' <= (List.length prog). *)
-(* Admitted. *)
- 
-Lemma FzeroTerminate : forall st rtn,
-    F st = 0 -> interpr_step st = state_finished rtn.
-  intros st rtn.
-  destruct st as [prog data net expr args n | rt].
-  + intros Hfst0.
-    unfold F in Hfst0.
-    remember (length prog) as proglength.
-    remember (getnPrefix args) as prefixlength.
-    induction n.
-    (* n = 0, then either progLength = 0 or prefix = 0 *)
-    - induction prefixlength.
-      * apply prefix0Terminate. auto. auto.
-      * 
-
- 
-(* Lemma interpreterTerminate : forall prog net data, *)
-(*     noLoop prog = true -> hasAnchor prog = true -> *)
-(*     exists i rval, interpr_main prog i net data = Some rval. *)
-(* Proof. *)
-(*   intros. *)
-(*   exists (Nat.add 10 (exprLength prog)). *)
-(*   (* unfold interpr_findMatchRule. *) *)
-(*   induction prog as [|expr t]. *)
-(*   - simpl. exists noMatchingRule. reflexivity. *)
-(*   - *)
-
-
 (* Compute interpr_follow sampleProgram6 9 blogNet dataAdmin (getExpr sampleProgram6 (ruleName "admin")) []. *)
 
 (* Compute isMatch (getName dataKey) [(mc_indexed (mc_sequence_wild "blog"));(mc_exact "blog");(mc_exact "KEY");(mc_wild)]. *)
@@ -1647,9 +1525,3 @@ Lemma FzeroTerminate : forall st rtn,
    could be match.
    This result is very intuitive, since it only run a one-way pass alone the way, instead of
    doing a backtracking search that might have server cases. *)
-
-(* todo *)
-(* how to use map *)
-(* write execution *)
-
-(* write a dummy matching interface*)
