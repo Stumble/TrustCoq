@@ -273,6 +273,17 @@ Fixpoint hasPrefix (para:list RuleParameter) : bool :=
             end
   end.
 
+Lemma hasPrefixHd : forall h t,
+    hasPrefix (h::t) = true ->
+    (exists x y, h = rp_prefixOfIndexed x y).
+Proof.
+  intros.
+  unfold hasPrefix in H.
+  destruct h.
+  inversion H.
+  exists n n0. eauto.
+Qed.
+
 Example hasPrefixTest1 : hasPrefix [(rp_prefixOfIndexed 1 1)] = true.
 Proof.
   reflexivity.
@@ -618,6 +629,13 @@ Fixpoint getPrefix (nm:Name) (n:nat) : option Name :=
              end
   end.
 
+Lemma getPrefixLt :
+  forall nm n nm',
+    (getPrefix nm n = Some nm') ->
+    length nm' < length nm.
+Proof.
+Admitted.
+
 Example getPrefixTest1 : getPrefix ["a";"b";"c";"d"] 2 = Some ["a";"b"].
 Proof.
   reflexivity.
@@ -638,23 +656,55 @@ Proof.
   reflexivity.
 Qed.
 
+Fixpoint getNinList (n:nat) {T:Type} (l:list T) : option T :=
+  match n with
+  | 0 => match l with
+         | [] => None
+         | h :: t => Some h
+         end
+  | S n' => match l with
+            | [] => None
+            | h :: t => getNinList n' t
+            end
+  end.
+
+Check [].
+
+Lemma getNinListEmptyList : forall n T (l:list T),
+    (l = []) ->
+    getNinList n l = None.
+Proof.
+  intros.
+  rewrite H.
+  unfold getNinList.
+  destruct n. eauto. eauto.
+Qed.
+
 Fixpoint genArgs (indexed:list Name) (rp: list RuleParameter) : option (list Name) :=
   match rp with
   | [] => Some []
   | h::t => match h with
-            | rp_indexed n => let nm := (nth (pred n) indexed empty_name) in
-                              match (genArgs indexed t) with
-                              | None => None
-                              | Some rtn => Some (nm :: rtn)
-                              end
-            | rp_prefixOfIndexed n minusN => let nm := (nth (pred n) indexed empty_name) in
-                                              match (getPrefix nm minusN) with
-                                              | None => None
-                                              | Some prefix => match (genArgs indexed t) with
-                                                               | None => None
-                                                               | Some rtn => Some (prefix::rtn)
-                                                               end
-                                              end
+            | rp_indexed n =>
+              match indexed with
+              | [] => None
+              | hdIndexed::tlIndexed =>
+                match (genArgs tlIndexed t) with
+                | None => None
+                | Some rtn => Some (hdIndexed :: rtn)
+                end
+              end
+            | rp_prefixOfIndexed n minusN =>
+              match indexed with
+              | [] => None
+              | hdIndexed::tlIndexed =>
+                match (getPrefix hdIndexed minusN) with
+                | None => None
+                | Some prefix => match (genArgs tlIndexed t) with
+                                 | None => None
+                                 | Some rtn => Some (prefix::rtn)
+                                 end
+                end
+              end
             end
   end.
 
@@ -1188,35 +1238,112 @@ Lemma genArgs_lt_if_prefix : forall indexed nxtPl l,
     (hasPrefix nxtPl = true) ->
     (getNPrefix l < getNPrefix indexed).
 Proof.
-Admitted.
+  intros.
+  destruct indexed.
+  + (* empty *)
+    
+    eauto.
+    destruct nxtPl.
+    unfold genArgs in H.
+    inversion H0.
+    unfold genArgs in H.
+    destruct r eqn:Heqr.
+    inversion H. inversion H.
+  + destruct nxtPl.
+    inversion H0.
+    unfold genArgs in H.
+    fold genArgs in H.
+    destruct r eqn:Heqr.
+    destruct (genArgs indexed nxtPl) eqn:Heqrtn.
+    inversion H.
+    unfold getNPrefix.
+    apply hasPrefixHd in H0.
+    (* destruct on exists *)
+    destruct H0 as (x & y & Hgg).
+    inversion Hgg.
+    apply hasPrefixHd in H0.
+    destruct H0 as (x & y & Hgg).
+    inversion Hgg.
+    destruct (getPrefix n n1) eqn:Hgetp.
+    destruct (genArgs indexed nxtPl) eqn:HeqGen.
+    inversion H.
+    unfold getNPrefix.
+    apply getPrefixLt with (n:=n1). eauto. 
+    inversion H.
+    inversion H.
+Qed.
 
 Lemma genArgs_le : forall indexed nxtPl l,
     (genArgs indexed nxtPl = Some l) ->
     (getNPrefix l <= getNPrefix indexed).
 Proof.
   intros.
-  unfold genArgs in H.
-  induction indexed eqn:HeqIndex.
-  destruct nxtPl eqn:HeqPl.
-  + inversion H.
-    simpl. omega.
-  + fold genArgs in H.
-    destruct r.
-    destruct (genArgs [] l0).
+  destruct indexed.
+  + (* indexed empty *)
+    destruct nxtPl.
+    unfold genArgs in H.
     inversion H.
-  generalize indexed.
-  inversion H.
-  simpl.
-  unfold getNPrefix.
-  destruct indexed0.
-  omega.
-  omega.
-  fold genArgs in H.
-    fold genArgs in IHl0.
-    destruct a eqn:HeqR.
-    destruct (genArgs indexed l0).
-    apply IHl0.
-  fold genArgs in H.
+    simpl. eauto.
+    unfold genArgs in H.
+    destruct r.
+    inversion H. inversion H.
+  +  destruct nxtPl.
+     * unfold genArgs in H.
+       inversion H. simpl. omega. 
+     * unfold genArgs in H.
+       destruct r.
+       fold genArgs in H.
+       - destruct (genArgs indexed nxtPl) eqn:Heq2.
+         inversion H. unfold getNPrefix. omega.
+         inversion H.
+       - fold genArgs in H.
+         destruct (getPrefix n n1) eqn:Hgp.
+         destruct (genArgs indexed nxtPl) eqn:Heqg.
+         inversion H.
+         unfold getNPrefix.
+         Check getPrefixLt.
+         apply getPrefixLt in Hgp.
+         omega.
+         inversion H. inversion H.
+Qed.
+
+  (*   rewrite getNinListEmptyList in H. *)
+  (*   inversion H. eauto. *)
+  (*   rewrite getNinListEmptyList in H. *)
+  (*   inversion H. eauto. *)
+  (* + (* indexed h::t *) *)
+  (*   eauto. *)
+  (*   destruct nxtPl. *)
+  (*   - unfold genArgs in H. inversion H. *)
+  (*     simpl. omega. *)
+  (*   - unfold genArgs in H. fold genArgs in H. *)
+  (*     destruct r eqn:Heqr. *)
+  (*     *  *)
+
+  (* destruct nxtPl. *)
+  (* inversion H. eauto. *)
+  (* destruct r. *)
+  (* unfold genArgs in H. *)
+  (* simpl. *)
+
+
+
+  (*   destruct (genArgs [] l0). *)
+  (*   simpl. *)
+  (*   inversion H. *)
+  (* generalize indexed. *)
+  (* inversion H. *)
+  (* simpl. *)
+  (* unfold getNPrefix. *)
+  (* destruct indexed0. *)
+  (* omega. *)
+  (* omega. *)
+  (* fold genArgs in H. *)
+  (*   fold genArgs in IHl0. *)
+  (*   destruct a eqn:HeqR. *)
+  (*   destruct (genArgs indexed l0). *)
+  (*   apply IHl0. *)
+  (* fold genArgs in H. *)
 Admitted.
 
 Lemma mathBasic_lelt : forall a b c,
