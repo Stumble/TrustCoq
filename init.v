@@ -1089,28 +1089,6 @@ Fixpoint interpr_step_main (n:nat) (st:State) : Rst :=
             end
   end.
 
-Lemma Flt0 : forall st x,
-    (F st = x) -> (x > 0).
-Admitted.
-
-Lemma stepFstlt0 : forall st prog dt net e args,
-    (interpr_step st = state prog dt net e args) ->
-    (F st) > 0.
-Admitted.
-
-Lemma stepFinish : forall st st' prog data net e args,
-    (st' = state prog data net e args) ->
-    (interpr_step st = st') ->
-    (exists rtn, interpr_step_main (F st) (st') = finished rtn).
-  intros st st' prog data net e args.
-  intros Hst Hstep.
-  induction (F st) as [|n'] eqn:HeqFst.
-  + rewrite Hst in Hstep. apply stepFstlt0 in Hstep.
-    rewrite HeqFst in Hstep. inversion Hstep.
-  + rewrite HeqFst in IHn'.
-    simpl.
-Admitted.
-
 (* if st_cont => st', st' = finished \/ st'=cont && F st' < F st_cont. *)
 (* | state : ProgramLabeled -> Data -> Network -> ExprLabeled -> (list Name)-> State *)
 (* | state_finished : Rtn -> State. *)
@@ -1131,6 +1109,17 @@ Fixpoint hasPrefixRc (rc:RuleCall) : bool :=
   match rc with
   | ruleCall rn pl => hasPrefix pl
   end.
+
+Lemma hasPrefixRcToPrefix :
+  forall rc rn pl,
+    (rc = ruleCall rn pl) ->
+    (hasPrefixRc rc = true) -> (hasPrefix pl = true).
+Proof.
+  intros.
+  unfold hasPrefixRc in H0.
+  rewrite H in H0.
+  eauto.
+Qed.
 
 Inductive hasPrefixOrAnchor :
   Action -> Prop :=
@@ -1205,6 +1194,29 @@ Lemma genArgs_le : forall indexed nxtPl l,
     (genArgs indexed nxtPl = Some l) ->
     (getNPrefix l <= getNPrefix indexed).
 Proof.
+  intros.
+  unfold genArgs in H.
+  induction indexed eqn:HeqIndex.
+  destruct nxtPl eqn:HeqPl.
+  + inversion H.
+    simpl. omega.
+  + fold genArgs in H.
+    destruct r.
+    destruct (genArgs [] l0).
+    inversion H.
+  generalize indexed.
+  inversion H.
+  simpl.
+  unfold getNPrefix.
+  destruct indexed0.
+  omega.
+  omega.
+  fold genArgs in H.
+    fold genArgs in IHl0.
+    destruct a eqn:HeqR.
+    destruct (genArgs indexed l0).
+    apply IHl0.
+  fold genArgs in H.
 Admitted.
 
 Lemma mathBasic_lelt : forall a b c,
@@ -1217,11 +1229,18 @@ Proof.
 Qed.
 
 Lemma hasPrefixOrAnchor_on_nxtPl :
-  forall actRc nxtRn nxtPl,
+  forall nxtRn nxtPl,
     (hasPrefixOrAnchor (actRc (ruleCall nxtRn nxtPl))) ->
     hasPrefix nxtPl = true.
 Proof.
-Admitted.
+  intros.
+  inversion H.
+  inversion H0.
+  inversion H1.
+  apply hasPrefixRcToPrefix with (rc:=rc) (rn:=nxtRn).
+  eauto. eauto.
+  inversion H2.
+Qed.
 
 Lemma hasPrefixOrAnchor_on_all_nxtPl :
   forall nxtRn1 nxtPl1 nxtRn2 nxtPl2,
@@ -1229,7 +1248,18 @@ Lemma hasPrefixOrAnchor_on_all_nxtPl :
                                     (ruleCall nxtRn2 nxtPl2))) ->
     (hasPrefix nxtPl1 = true) /\ (hasPrefix nxtPl2 = true).
 Proof.
-Admitted.
+  intros.
+  rename H into Hhas.
+  inversion Hhas.
+  + inversion H.
+  + inversion H0.
+  + inversion H1.
+    split.
+    apply hasPrefixRcToPrefix with (rc:=rc1) (rn:=nxtRn1).
+    eauto. eauto.
+    apply hasPrefixRcToPrefix with (rc:=rc2) (rn:=nxtRn2).
+    eauto. eauto.
+Qed.
 
 Lemma mathNatZero :
   forall a b,
