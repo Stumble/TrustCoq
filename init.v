@@ -69,13 +69,6 @@ Proof.
   apply mcm_index. apply mcm_seq. apply string_neq_ref. reflexivity.
 Qed.
 
-Example regMatch1 : regMatch [(mc_indexed (mc_sequence_wild "blog"));
-                              (mc_exact "blog");
-                              (mc_exact "article")]
-                             ["a";"b";"blog";"article"].
-Proof.
-Admitted.
-
 Inductive RuleParameter : Type :=
   | rp_indexed : nat -> RuleParameter
   | rp_prefixOfIndexed : nat -> nat -> RuleParameter.
@@ -995,25 +988,48 @@ Fixpoint labelProgram (prog:Program) : ProgramLabeled :=
 
 Compute (labelProgram sampleProgram6).
 
+(* check program labels against specs *)
+(* 1. expr with getPrefix in parameter: n2s = 0 *)
+(* 2. expr anchor has: n2s = 0 *)
+(* 3. expr without prefix nor anchor: n2s = (getExpr prog n)'s n + 1 *)
+
+Print beq_nat.
+
+Fixpoint checkLabeledProgramExpr (prog:ProgramLabeled) : bool :=
+  match prog with
+  | [] => true
+  | e::t => let '(exprl _ _ act n2s) := e in
+            match act with
+            | actRc (ruleCall nxtRn nxtPl) =>
+              if Nat.eqb n2s 0
+              then (if hasPrefix nxtPl
+                    then checkLabeledProgramExpr t
+                    else false)
+              else false
+            | actOrAnchor
+                (ruleCall nxtRn1 nxtPl1)
+                (ruleCall nxtRn2 nxtPl2) =>
+              if Nat.eqb n2s 0
+              then (if hasPrefix nxtPl1
+                    then checkLabeledProgramExpr t
+                    else false)
+              else false
+            | actAnchor _ => Nat.eqb n2s 0
+            end
+  end.
+
+Fixpoint checkProg (prog:ProgramLabeled) : bool :=
+  if (Nat.leb (length prog) 0)
+  then
+    false
+  else
+    checkLabeledProgramExpr prog.
+
 Definition getNPrefix (args:list Name) : nat :=
   match args with
   | [] => 0
   | h :: t => List.length h
   end.
-
-Lemma exprNum : forall expr rn mp act nToShrink,
-    (expr = exprl rn mp act nToShrink) ->
-    (nToShrink = 0) ->
-    (exists rn nxtPl, (act = actRc (ruleCall rn nxtPl)) /\ (hasPrefix nxtPl = true))
-      \/ (exists addr, act = (actAnchor addr)).
-Admitted.
-
-Lemma shrinkIfPrefix : forall act rn nxtPl args rtn,
-    (act = (ruleCall rn nxtPl)) ->
-    (hasPrefix nxtPl = true) ->
-    (rtn = genArgs args nxtPl) ->
-    ((rtn = None) \/ (exists nxtArgs, rtn = Some nxtArgs /\ (getNPrefix nxtArgs < getNPrefix args))).
-Admitted.
 
 Fixpoint similarFindMatch (n:nat) (l:list nat) (target:nat) : option bool :=
   match n with
@@ -1208,10 +1224,20 @@ Proof.
   Admitted.
 
 Lemma progLengthLt0 : forall st prog dt net e args,
+    (checkProg prog = true) ->
     (st = state prog dt net e args) ->
     (length prog > 0).
 Proof.
-Admitted.
+  intros st prog dt net e args.
+  intros Hck Hst.
+  unfold checkProg in Hck.
+  remember (length prog) as pl.
+  destruct prog.
+  + simpl in Hck. inversion Hck.
+  + destruct (length (e0 :: prog)) eqn:HeqIf.
+    simpl in Hck. inversion Hck.
+    rewrite Heqpl. omega.
+Qed.
 
 Lemma labelLtProgLength :
   forall st prog dt net e a rn mp act n2s,
@@ -1229,8 +1255,14 @@ Admitted.
 Lemma prefixZeroTerminate : forall st prog dt net e args,
     (st = state prog dt net e args) ->
     (getNPrefix args = 0) ->
+    (* missing condition, expr's n2s = 0 *)
     exists rtn, interpr_step st = state_finished rtn.
 Proof.
+  intros st prog dt net e args.
+  intros Hst Hp0.
+  rewrite Hst.
+  unfold interpr_step.
+
 Admitted.
 
 Lemma genArgs_lt_if_prefix : forall indexed nxtPl l,
@@ -1307,45 +1339,6 @@ Proof.
          inversion H. inversion H.
 Qed.
 
-  (*   rewrite getNinListEmptyList in H. *)
-  (*   inversion H. eauto. *)
-  (*   rewrite getNinListEmptyList in H. *)
-  (*   inversion H. eauto. *)
-  (* + (* indexed h::t *) *)
-  (*   eauto. *)
-  (*   destruct nxtPl. *)
-  (*   - unfold genArgs in H. inversion H. *)
-  (*     simpl. omega. *)
-  (*   - unfold genArgs in H. fold genArgs in H. *)
-  (*     destruct r eqn:Heqr. *)
-  (*     *  *)
-
-  (* destruct nxtPl. *)
-  (* inversion H. eauto. *)
-  (* destruct r. *)
-  (* unfold genArgs in H. *)
-  (* simpl. *)
-
-
-
-  (*   destruct (genArgs [] l0). *)
-  (*   simpl. *)
-  (*   inversion H. *)
-  (* generalize indexed. *)
-  (* inversion H. *)
-  (* simpl. *)
-  (* unfold getNPrefix. *)
-  (* destruct indexed0. *)
-  (* omega. *)
-  (* omega. *)
-  (* fold genArgs in H. *)
-  (*   fold genArgs in IHl0. *)
-  (*   destruct a eqn:HeqR. *)
-  (*   destruct (genArgs indexed l0). *)
-  (*   apply IHl0. *)
-  (* fold genArgs in H. *)
-Admitted.
-
 Lemma mathBasic_lelt : forall a b c,
     a < b ->
     b <= c ->
@@ -1402,6 +1395,7 @@ Lemma mathBasic1 :
     (B < D) ->
     (C <= A) ->
     A * B + C <= A * D + 0 - 1.
+  intros.
 Admitted.
 
 Lemma mathBasic2 :
@@ -1425,10 +1419,22 @@ Proof.
   apply IHA. inversion H.
 Admitted.
 
+Fixpoint checkState (st:State) : bool :=
+  match st with
+  | state prog dt net e args =>
+    checkProg prog
+  | state_finished rtn => true
+  end.
 
-(* forall st prog dt net e a, *)
-(*   st = state prog dt net e a -> *)
-(*   st *)
+Lemma checkStateImplyCheckProg : forall st prog dt net e args,
+    st = state prog dt net e args ->
+    checkState st = true ->
+    checkProg prog = true.
+  intros.
+  unfold checkState in H0.
+  rewrite H in H0.
+  eauto.
+Qed.
 
 Lemma step_args_smaller :
   forall st prog dt net e a st' p' d' n' e' a' rn mp act n2s
@@ -1651,8 +1657,9 @@ Proof.
 Qed.
 
 Lemma FzeroTerminate : forall st,
+    checkState st = true ->
     F st = 0 -> (exists rtn, interpr_step st = state_finished rtn).
-  intros st Hfst0.
+  intros st Hck Hfst0.
   destruct st as [prog data net expr args | rt] eqn:HeqSt.
   +
     unfold F in Hfst0.
@@ -1660,6 +1667,8 @@ Lemma FzeroTerminate : forall st,
     apply mathBasic3 in Hfst0.
     Focus 2. apply progLengthLt0 with (st:=st)
     (dt:=data) (net:=net) (e:=expr) (args:=args).
+    eapply checkStateImplyCheckProg.
+    eauto. rewrite <- HeqSt in Hck. eauto. 
     rewrite <- HeqExpr in HeqSt. eauto.
     inversion Hfst0.
     rewrite <- HeqExpr in HeqSt.
