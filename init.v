@@ -1199,7 +1199,7 @@ Lemma step_prog_equal :
     st' = state p' d' n' e' a' ->
     interpr_step st = st' ->
     prog = p'.
-  Admitted.
+Admitted.
 
 Fixpoint hasPrefixRc (rc:RuleCall) : bool :=
   match rc with
@@ -1269,16 +1269,42 @@ Qed.
 Lemma checkExprImplyRc :
   forall prog e rn mp act n nxtRn nxtPl,
     e = exprl rn mp act n ->
+    n > 0 ->
     act = actRc (ruleCall nxtRn nxtPl) ->
     checkExpr prog e = true ->
     (forall e' rn' mp' act' n', e' = exprl rn' mp' act' n' ->
                                 e' = (getExpr prog nxtRn) ->
                                 n' < n).
-Admitted.
+  intros prog e rn mp act n nxtRn nxtPl.
+  intros He Hnl0 Hact Hck.
+  intros e' rn' mp' act' n'.
+  intros He'.
+  intros HeGet.
+  rewrite He in Hck.
+  unfold checkExpr in Hck.
+  destruct act eqn:HeqAct.
+  + destruct r eqn:HeqR.
+    destruct n.
+    inversion Hnl0.
+    simpl in Hck.
+    destruct (getExpr prog r0) eqn:HeqE'.
+    inversion Hact.
+    rewrite H0 in HeqE'.
+    rewrite HeGet in He'.
+    rewrite He' in HeqE'.
+    inversion HeqE'.
+    inversion Hck.
+    apply Nat.ltb_lt in H6.
+    omega.
+  + inversion Hact.
+  + inversion Hact.
+Qed.
+  
 
 Lemma checkExprImplyOr :
   forall prog e rn mp act n nxtRn1 nxtPl1 nxtRn2 nxtPl2,
     e = exprl rn mp act n ->
+    n > 0 ->
     act = actOrAnchor (ruleCall nxtRn1 nxtPl1)
                       (ruleCall nxtRn2 nxtPl2) ->
     checkExpr prog e = true ->
@@ -1286,7 +1312,36 @@ Lemma checkExprImplyOr :
           e' = exprl rn' mp' act' n' ->
           ((e' = (getExpr prog nxtRn1)) \/ e' = (getExpr prog nxtRn2)) ->
           n' < n).
-Admitted.
+  intros prog e rn mp act n nxtRn1 nxtPl1 nxtRn2 nxtPl2.
+  intros He Hnlt0 Hact Hck.
+  intros e' rn' mp' act' n'.
+  intro He'.
+  intros Hrst.
+  rewrite Hact in He.
+  rewrite He in Hck.
+  unfold checkExpr in Hck.
+  destruct n.
+  inversion Hnlt0.
+  simpl in Hck.
+  destruct (getExpr prog nxtRn1) eqn:HG1.
+  destruct (getExpr prog nxtRn2) eqn:HG2.
+  destruct (n0 <? S n) eqn:HeqLt1.
+  Focus 2. inversion Hck.
+  inversion Hck.
+  destruct (n1 <? S n) eqn:HeqLt2.
+  Focus 2. inversion H0.
+  destruct Hrst as [Hn0 | Hn1].
+  +  rewrite Hn0 in He'.
+     inversion He'.
+     rewrite <- H4.
+     apply Nat.ltb_lt in HeqLt1.
+     eauto.
+  +  rewrite Hn1 in He'.
+     inversion He'.
+     rewrite <- H4.
+     apply Nat.ltb_lt in HeqLt2.
+     eauto.
+Qed.
 
 Lemma labeled_prog_args_shrink_rc:
   forall st prog dt net e args rn mp act n nxtRn nxtPl,
@@ -1296,7 +1351,7 @@ Lemma labeled_prog_args_shrink_rc:
     act = actRc (ruleCall nxtRn nxtPl) ->
     ( (n = 0 /\ hasPrefixOrAnchor act)
       \/
-      (forall e' rn' mp' act' n', e' = exprl rn' mp' act' n' ->
+      ((n > 0) /\ forall e' rn' mp' act' n', e' = exprl rn' mp' act' n' ->
                                  e' = (getExpr prog nxtRn) ->
                                  n' < n)
     ).
@@ -1312,6 +1367,8 @@ Proof.
     Focus 2. eauto. Focus 2. eauto.
     eauto.
   + right.
+    split.
+    omega.
     intros e' rn' mp' act' n'.
     intros He'.
     intros HgetE'.
@@ -1320,6 +1377,7 @@ Proof.
     inversion Hck.
     eapply checkExprImplyRc in H;
     repeat eauto.
+    omega.
 Qed.
 
 
@@ -1357,6 +1415,7 @@ Proof.
     inversion Hck.
     eapply checkExprImplyOr in H;
     repeat eauto.
+    omega.
 Qed.
 
 Lemma progLengthLt0 : forall st prog dt net e args,
