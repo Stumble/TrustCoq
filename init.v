@@ -993,35 +993,48 @@ Compute (labelProgram sampleProgram6).
 (* 2. expr anchor has: n2s = 0 *)
 (* 3. expr without prefix nor anchor: n2s = (getExpr prog n)'s n + 1 *)
 
-Print beq_nat.
-
-Fixpoint checkLabeledProgramExpr (prog:ProgramLabeled) : bool :=
-  match prog with
-  | [] => true
-  | e::t => let '(exprl _ _ act n2s) := e in
-            match act with
-            | actRc (ruleCall nxtRn nxtPl) =>
-              if Nat.eqb n2s 0
-              then (if hasPrefix nxtPl
-                    then checkLabeledProgramExpr t
-                    else false)
-              else false
-            | actOrAnchor
-                (ruleCall nxtRn1 nxtPl1)
-                (ruleCall nxtRn2 nxtPl2) =>
-              if Nat.eqb n2s 0
-              then (if hasPrefix nxtPl1
-                    then checkLabeledProgramExpr t
-                    else false)
-              else false
-            | actAnchor _ => Nat.eqb n2s 0
-            end
+(* Must use function due to there are _ in matching,
+   coq can't unfold match with _*)
+Function checkExpr (prog:ProgramLabeled) (e:ExprLabeled) : bool :=
+  let '(exprl _ _ act n2s) := e in
+  (* match e with *)
+  (* | (exprl _ _ act n2s) => *)
+  match act with
+  | actRc (ruleCall nxtRn nxtPl) =>
+    if Nat.eqb n2s 0
+    then (if hasPrefix nxtPl
+          then true
+          else false)
+    else (let e' := getExpr prog nxtRn in
+          let '(exprl _ _ _ n2s') := e' in
+          Nat.ltb n2s' n2s
+         )
+  | actOrAnchor
+      (ruleCall nxtRn1 nxtPl1)
+      (ruleCall nxtRn2 nxtPl2) =>
+    if Nat.eqb n2s 0
+    then (if hasPrefix nxtPl1
+          then (hasPrefix nxtPl2)
+          else false)
+    else (let e' := getExpr prog nxtRn1 in
+          let '(exprl _ _ _ n2s') := e' in
+          let e'' := getExpr prog nxtRn2 in
+          let '(exprl _ _ _ n2s'') := e'' in
+          if Nat.ltb n2s' n2s
+          then (if Nat.ltb n2s'' n2s then true else false)
+          else false
+         )
+  | actAnchor _ => Nat.eqb n2s 0
   end.
+
+(* small trick: use eqb true is easier to say every expr is true *)
+Fixpoint checkLabeledProgramExpr (prog:ProgramLabeled) : bool :=
+  let temp := (map (checkExpr prog) prog) in
+  fold_left eqb temp true.
 
 Fixpoint checkProg (prog:ProgramLabeled) : bool :=
   if (Nat.leb (length prog) 0)
-  then
-    false
+  then false
   else
     checkLabeledProgramExpr prog.
 
@@ -1057,6 +1070,23 @@ Qed.
 Inductive State : Type :=
 | state : ProgramLabeled -> Data -> Network -> ExprLabeled -> (list Name)-> State
 | state_finished : Rtn -> State.
+
+Fixpoint checkState (st:State): bool :=
+  match st with
+  | state prog dt net e args =>
+    checkProg prog
+  | state_finished rtn => true
+  end.
+
+Lemma checkStateImplyCheckProg : forall st prog dt net e args,
+    st = state prog dt net e args ->
+    checkState st = true ->
+    checkProg prog = true.
+  intros.
+  unfold checkState in H0.
+  rewrite H in H0.
+  eauto.
+Qed.
 
 Inductive Rst : Type :=
 | unfinish
@@ -1193,8 +1223,74 @@ Inductive hasPrefixOrAnchor :
   | hpa_actRc : forall rc act, (hasPrefixRc rc = true) -> act = actRc rc -> hasPrefixOrAnchor act
   | hpa_actOrAnchor : forall rc1 rc2 act, (hasPrefixRc rc1 = true) -> (hasPrefixRc rc2 = true) -> act = actOrAnchor rc1 rc2 -> hasPrefixOrAnchor act.
 
+Lemma checkStateImply :
+  forall st prog dt net e args,
+    checkState st = true ->
+    st = state prog dt net e args ->
+    (checkExpr prog e = true
+     /\
+    checkProg prog = true).
+Admitted.
+
+Lemma checkExprImply1 :
+  forall e rn mp act n prog,
+    e = exprl rn mp act n ->
+    checkExpr prog e = true ->
+    n = 0 ->
+    hasPrefixOrAnchor act.
+  intros e rn mp act n prog.
+  intros He Hck Hn0.
+  unfold checkExpr in Hck.
+  rewrite He in Hck.
+  destruct act eqn:Hact.
+  + destruct r eqn:Heqr.
+    rewrite Hn0 in Hck.
+    simpl in Hck.
+    destruct (hasPrefix l) eqn:HhasPrefix.
+    - rewrite <- Hact.
+      apply hpa_actRc in Hact. eauto.
+      unfold hasPrefixRc. eauto.
+    - inversion Hck.
+  + destruct r eqn:Heqr.
+    destruct r0 eqn:Heqr0.
+    rewrite Hn0 in Hck.
+    simpl in Hck.
+    destruct (hasPrefix l) eqn:HhasPrefix.
+    - rewrite <- Hact.
+      apply hpa_actOrAnchor in Hact. eauto.
+      eauto.
+      unfold hasPrefixRc. eauto.
+    - inversion Hck.
+      + rewrite <- Hact.
+        apply hpa_anchor in Hact.
+        eauto.
+Qed.
+
+Lemma checkExprImplyRc :
+  forall prog e rn mp act n nxtRn nxtPl,
+    e = exprl rn mp act n ->
+    act = actRc (ruleCall nxtRn nxtPl) ->
+    checkExpr prog e = true ->
+    (forall e' rn' mp' act' n', e' = exprl rn' mp' act' n' ->
+                                e' = (getExpr prog nxtRn) ->
+                                n' < n).
+Admitted.
+
+Lemma checkExprImplyOr :
+  forall prog e rn mp act n nxtRn1 nxtPl1 nxtRn2 nxtPl2,
+    e = exprl rn mp act n ->
+    act = actOrAnchor (ruleCall nxtRn1 nxtPl1)
+                      (ruleCall nxtRn2 nxtPl2) ->
+    checkExpr prog e = true ->
+    (forall e' rn' mp' act' n',
+          e' = exprl rn' mp' act' n' ->
+          ((e' = (getExpr prog nxtRn1)) \/ e' = (getExpr prog nxtRn2)) ->
+          n' < n).
+Admitted.
+
 Lemma labeled_prog_args_shrink_rc:
   forall st prog dt net e args rn mp act n nxtRn nxtPl,
+    checkState st = true ->
     st = state prog dt net e args ->
     e = exprl rn mp act n ->
     act = actRc (ruleCall nxtRn nxtPl) ->
@@ -1205,10 +1301,31 @@ Lemma labeled_prog_args_shrink_rc:
                                  n' < n)
     ).
 Proof.
-  Admitted.
+  intros st prog dt net e args rn mp act n nxtRn nxtPl.
+  intros Hck Hst He Hact.
+  destruct n.
+  + left. split. eauto.
+    eapply checkStateImply in Hck.
+    Focus 2. eauto.
+    inversion Hck.
+    eapply checkExprImply1 in H.
+    Focus 2. eauto. Focus 2. eauto.
+    eauto.
+  + right.
+    intros e' rn' mp' act' n'.
+    intros He'.
+    intros HgetE'.
+    eapply checkStateImply in Hck.
+    Focus 2. eauto.
+    inversion Hck.
+    eapply checkExprImplyRc in H;
+    repeat eauto.
+Qed.
+
 
 Lemma labeled_prog_args_shrink_or:
   forall st prog dt net e args rn mp act n nxtRn1 nxtPl1 nxtRn2 nxtPl2,
+    checkState st = true ->
     st = state prog dt net e args ->
     e = exprl rn mp act n ->
     act = actOrAnchor (ruleCall nxtRn1 nxtPl1)
@@ -1221,7 +1338,26 @@ Lemma labeled_prog_args_shrink_or:
           n' < n)
     ).
 Proof.
-  Admitted.
+  intros st prog dt net e args rn mp act n nxtRn1 nxtPl1 nxtRn2 nxtPl2.
+  intros Hck Hst He Hact.
+  destruct n.
+  + left. split. eauto.
+    eapply checkStateImply in Hck.
+    Focus 2. eauto.
+    inversion Hck.
+    eapply checkExprImply1 in H.
+    Focus 2. eauto. Focus 2. eauto.
+    eauto.
+  + right.
+    intros e' rn' mp' act' n'.
+    intros He'.
+    intros HgetE'.
+    eapply checkStateImply in Hck.
+    Focus 2. eauto.
+    inversion Hck.
+    eapply checkExprImplyOr in H;
+    repeat eauto.
+Qed.
 
 Lemma progLengthLt0 : forall st prog dt net e args,
     (checkProg prog = true) ->
@@ -1419,26 +1555,10 @@ Proof.
   apply IHA. inversion H.
 Admitted.
 
-Fixpoint checkState (st:State) : bool :=
-  match st with
-  | state prog dt net e args =>
-    checkProg prog
-  | state_finished rtn => true
-  end.
-
-Lemma checkStateImplyCheckProg : forall st prog dt net e args,
-    st = state prog dt net e args ->
-    checkState st = true ->
-    checkProg prog = true.
-  intros.
-  unfold checkState in H0.
-  rewrite H in H0.
-  eauto.
-Qed.
-
 Lemma step_args_smaller :
   forall st prog dt net e a st' p' d' n' e' a' rn mp act n2s
   rn' mp' act' n2s',
+    checkState st = true ->
     st = state prog dt net e a ->
     st' = state p' d' n' e' a' ->
     e = exprl rn mp act n2s ->
@@ -1450,7 +1570,7 @@ Lemma step_args_smaller :
   intros
     st prog dt net e a st' p' d' n' e' a' rn mp act n2s
     rn' mp' act' n2s'.
-  intros Hst Hst' He He' Hstep.
+  intros Hck Hst Hst' He He' Hstep.
   assert (Hshrink := Hst).
   (* apply labeled_prog_args_shrink_step with *)
   (*   (rn:=rn) (mp:=mp) (act:=act) (n:=n2s)in Hshrink. *)
@@ -1472,6 +1592,7 @@ Lemma step_args_smaller :
         (rn:=rn) (mp:=mp) (act:=act) (n:=n2s)
                  (nxtRn:=nxtRn) (nxtPl:=nxtPl) in Hshrink.
         (* solving trivial goals *)
+        Focus 2. eauto.
         Focus 2. eauto. rewrite <- HeqAct in He. eauto.
         Focus 2. eauto.
         destruct (genArgs indexed nxtPl) eqn:HeqGenArgs.
@@ -1507,9 +1628,9 @@ Lemma step_args_smaller :
         apply labeled_prog_args_shrink_or with
         (rn:=rn) (mp:=mp) (act:=act) (n:=n2s)
                  (nxtRn1:=nxtRn1) (nxtPl1:=nxtPl1)
-                 (nxtRn2:=nxtRn2) (nxtPl2:=nxtPl2)  in Hshrink.
+                 (nxtRn2:=nxtRn2) (nxtPl2:=nxtPl2)  in Hshrink;eauto.
         Focus 2. rewrite <- HeqAct in He. eauto.
-        Focus 2. eauto.
+        (* Focus 2. eauto. *)
         destruct (genArgs indexed nxtPl1) eqn:HeqGenArgs.
         ++ (* genArgs indexed nxtPl1 = (true, l) *)
           eauto.
@@ -1583,13 +1704,14 @@ Qed.
 
 Lemma step_cont_le :
   forall st prog dt net e a st' p' d' n' e' a',
+    checkState st = true ->
     st = state prog dt net e a ->
     st' = state p' d' n' e' a' ->
     interpr_step st = st' ->
     F st' <= F st - 1.
 Proof.
   intros st prog dt net e a st' p' d' n' e' a'.
-  intros Hst Hst' Hstep.
+  intros Hck Hst Hst' Hstep.
   rewrite Hst.
   rewrite Hst'.
   unfold F.
@@ -1628,13 +1750,14 @@ Proof.
     apply mathBasic2.
     eauto. eauto.
   - rewrite <- HeqE in Hst. eauto.
+  - rewrite <- HeqE in Hst. eauto. 
   - rewrite <- HeqE' in Hst'. eauto.
   - eauto.
   - eauto.
 Qed.
 
-
 Lemma step_result : forall st prog dt net e args st',
+    checkState st = true ->
     (st = state prog dt net e args) ->
     (interpr_step st = st') ->
     (
@@ -1652,7 +1775,7 @@ Proof.
     (prog:=prog) (dt:=dt) (net:=net) (e:=e) (a:=args)
     (p':=p') (d':=d') (n':=n') (e':=e') (a':=a').
     repeat eauto. rewrite <- Hstep in HeqRtn. eauto.
-    rewrite <- Hstep in HeqRtn. eauto.
+    eauto. rewrite H in HeqRtn. eauto.
   + left. eauto.
 Qed.
 
