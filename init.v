@@ -754,48 +754,6 @@ Fixpoint argTest (arg1:list Name) (arg2:list Name) : bool :=
   | _,_ => false
   end.
 
-(* Fixpoint interpr_follow (progConst:Program) (n:nat) (net:Network) *)
-(*          (data:Data) (expr:Expr) (args:list Name) := *)
-(*   match n with *)
-(*   | 0 => None *)
-(*   | S n' => *)
-(*     let interpr_follow_next := interpr_follow progConst n' net in *)
-(*     let '(expr rname mp act) := expr in *)
-(*     match isMatch (getName data) mp with *)
-(*     | (false, _) => Some keyNotMatch *)
-(*     | (true, indexed) => *)
-(*       match (argTest indexed args) with *)
-(*       | false => Some keyNotMatch *)
-(*       | true => *)
-(*         match act with *)
-(*         | actRc (ruleCall nxtRn nxtPl) => match (genArgs indexed nxtPl) with *)
-(*                                           | None => Some noMorePrefix *)
-(*                                           | Some nxtArgs => *)
-(*                                             interpr_follow_next (getKey net data) (getExpr progConst nxtRn) nxtArgs *)
-(*                                           end *)
-(*         | actAnchor addr => if beq_string addr (nameToString (getKeyLocator data)) *)
-(*                             then Some succ *)
-(*                             else Some authFail *)
-(*         | actOrAnchor pRule aRule => *)
-(*           let '(ruleCall pRn pPl) := pRule in *)
-(*           let '(ruleCall aRn aPl) := aRule in *)
-(*           match (genArgs indexed pPl) with *)
-(*           (* this mean no more prefix, directly handover this packet to anchor rule *) *)
-(*           | None => *)
-(*             (* (rtnDebugAny Data data) *) *)
-(*             match (genArgs indexed aPl) with *)
-(*             | None => None *)
-(*             | Some aArgs => interpr_follow_next data (getExpr progConst aRn) aArgs *)
-(*             end *)
-(*           | Some pArgs => *)
-(*             (* Some (rtnDebugAny Data data) *) *)
-(*             interpr_follow_next (getKey net data) (getExpr progConst pRn) pArgs *)
-(*           end *)
-(*         end *)
-(*       end *)
-(*     end *)
-(*   end. *)
-
 Fixpoint interpr_findMatchRule (prog:Program) (data:Data) : option Expr :=
   match prog with
   | [] => None
@@ -807,13 +765,6 @@ Fixpoint interpr_findMatchRule (prog:Program) (data:Data) : option Expr :=
     | true => Some h
     end
   end.
-
-(* Fixpoint interpr_main (prog:Program) (n:nat) *)
-(*          (net:Network) (data:Data) : option Rtn := *)
-(*   match interpr_findMatchRule prog data with *)
-(*   | None => Some noMatchingRule *)
-(*   | Some eMatched => interpr_follow prog n net data eMatched [] *)
-(*   end. *)
 
 Example sampleProgram6 :=
   [(expr (ruleName "article")
@@ -1861,6 +1812,16 @@ Lemma FzeroTerminate : forall st,
     eauto. eauto.
   + simpl. eauto.
 Qed.
+
+Lemma interprMultiStepNSmaller :
+  forall st st' n,
+    checkState st = true ->
+    interpr_multi_step n st = st' ->
+    ((exists rtn, st' = state_finished rtn)
+      \/
+      (forall prog' dt' net' e' args', st' = (state prog' dt' net' e' args') -> F st' <= F st - 1)).
+Proof.
+Admitted.
 
 (* Compute interpr_follow sampleProgram6 9 blogNet dataAdmin (getExpr sampleProgram6 (ruleName "admin")) []. *)
 
