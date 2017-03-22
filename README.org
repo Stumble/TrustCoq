@@ -1,0 +1,516 @@
+#+OPTIONS: ^:nil
+
+* Introduction
+** Backgroud
+Named-data network(NDN) introduces a data-centric manner for communication by assigning each data packet 
+a corresponding name and letting application retrieve data by name, 
+instead of by using communication tunnel between hosts. 
+NDN architecture embed data authentication into network layer by requiring all data packets to be signed.
+
+However, securing communication in network application is complicated even for experienced programmer. 
+Design a secure system involves properly authentication of multiple entities 
+and granting these entities with a minimal set of privileges.
+
+NDN trust schema provide the ability to de-couple security logic from program logic.
+Using trust schema, programers could focus on design and implementation of bussiness logic,
+leaving network security part to NDN trust schema.
+Trust schema will match data packet's name with security policy, then execute security checks,
+which usually are signature authentication.
+
+To write a trust schema, a domain-specific language is purposed by 
+[fn::https://named-data.net/wp-content/uploads/2015/06/ndn-0030-2-trust-schema.pdf].
+The language utilize a regular-expression-like expression for expressing
+the data name matching, and a simple policy invocation rule to composite
+policies to form a hierarchical trust rule.
+
+# NDN的trust schema可以将security和程序逻辑解耦，
+# 使得程序可以专注与业务逻辑。通过编写按照数据包名进行匹配执行的trust schema，NDN应用可以将网络安全部分的直接交给NDN。
+
+# 编写这个trust schema需要一个domain specific language。
+# 这个语言以正则表达式为基础，组织一个规则调用序列，使得程序接受任何
+# 满足安全规则的数据包，进行签名检查。
+
+** Problem & Motivation
+
+# When using this trust schema, 
+Defining a security policy is not a small matter.
+# We want those user-defined policy to be more security.
+One problem is that, since signature checking is an expensive operation,
+if a user defines a policy that might let a malicious user construct
+a circular signed data packets, computation resource might all be eaten
+by this authentication process, which will run forever. 
+Therefore, we want to execute some property-checks on those policies, 
+to make sure that, all check-passed policies,
+will terminate in a finite time, regardless of whatever data the policy is inspecting against.
+
+# 使用这个trust schema同时也要考虑，
+# 检查签名是一项非常消耗cpu的工作，如果安全规则的编写存在不完善的地方，
+# 有可能会被恶意用户构造循环数据包，消耗服务器的计算资源。所以，我们希望
+# 对所有的trust schema进行一些性质检测，使得通过检测的schema，保证会
+# 终止等。
+System security follows the so-called 'cask principle': 
+cask's volume is decided on the shortest wood plate that consists the cask.
+A lot of security loopholes are origined in software's specific implementation,
+instead of design. So, in this project, we apply program verification techniques
+on an implementation of this NDN trust schema interpreter, to formally proof that,
+as long as a policy can pass the termination check, it will terminate in a finite number 
+of steps.
+
+# 安全是非常重要的环节。有不少安全漏洞都是来源于具体实现的代码中存在漏洞，
+# 而pv正是提高软件质量，证明程序安全性的好方法。in this project, 我们希望通过pv，
+# 证明这个dsl和它的一个checker的具体实现，具有以下性质：
+
+# To summarize, in this project, we want to proof those following properties.
+
+# 1. For all policies that passed the check, it will terminate.
+# 2. 
+
+* Approach
+** Implementation Design
+*** Basic Data Structure
+Firstly, to implemtent an interpreter, we implemented
+basic components of the policy language and type of 
+data packets and network.
+
+#+begin_src text
+(*......*) 
+
+(*some basic type of language*)
+Inductive Data : Type :=
+| wrapped_data : Name -> Name -> Data -> Data
+| data : Name -> Name -> Data.
+
+Inductive MatchComp : Type :=
+| mc_wild : MatchComp
+| mc_sequence_wild : string -> MatchComp
+| mc_exact : string -> MatchComp
+| mc_indexed : MatchComp -> MatchComp.
+
+Definition MatchPattern := list MatchComp.
+
+(*......*)
+
+(* program is a list of expressions*)
+Inductive Expr : Type :=
+| expr : RuleName -> MatchPattern -> Action -> Expr.
+
+Inductive ExprLabeled : Type :=
+| exprl : RuleName -> MatchPattern -> Action -> nat -> ExprLabeled.
+
+Definition Program := list Expr.
+(*......*)
+#+end_src
+
+*** Checker
+The final design of checker is totally different from the
+original one. Checker can be viewed as two parts: a labeler and 
+a label checker, similar to the techniques used in CompCert. 
+
+# + 如果有prefix，则n = 0
+# + 如果是anchor，则n = 0
+# + 普通规则为所调用的规则的n' + 1
+
+The labeler first label the program against the following 
+specification:
++ if there is prefix truncate in invoking parameter, n = 0
++ if it is an anchor rule, n = 0
++ otherwise, n = n' + 1, where n' is the called rule's label
+
+It label a expression in a program with a number indicating the upper
+bound of how many steps at most, the interpreter will take to
+have a reduction in arguments, or to terminate because of reaching
+trust anchor rule. This number will later be used only for reasoning about
+interpreter's runtime behavior. 
+In the concrete implementation, due to Coq's limitation of 
+function totality, there is a work around here. 
+Since labeling need not take more than
+program length times to label all expression with final result,
+we simply set iterating times to be program length.
+
+#+begin_src text
+Fixpoint labelProgram (prog:Program) : ProgramLabeled :=
+  let n := List.length prog in
+  let progInitMiddle := (progInitLabel prog) in
+  let progFinalMidle := iterativeLabel n progInitMiddle in
+  progMiddle2Labled progFinalMidle.
+#+end_src
+
+Ideally, we need to proof this labeler will behave as label specification.
+But due to the time limitation, this part is missed right now. 
+So, there might be a chance that a correct program is wrongly labeled, then it can not pass the label checker. But since label checker has been proofed, wrong program will not be accepted by label checker.
+
+The second part, the label checker, is used to check that, 
+if an expression has been labeled with number n, 
+whether the expression has the corresponding behavior or not.
+So, only right program with right labels can pass this checker.
+#+begin_src text
+(* Must use function due to there are _ in matching,
+   coq can't unfold match with _*)
+Function checkExpr (prog:ProgramLabeled) (e:ExprLabeled) : bool :=
+  let '(exprl _ _ act n2s) := e in
+  match act with
+  | actRc (ruleCall nxtRn nxtPl) =>
+    if Nat.eqb n2s 0
+    then (if hasPrefix nxtPl
+          then true
+(*............................*) 
+#+end_src
+
+# 对于检查器，分为两个部分
+# + 标记器
+# 标记器首先对程序进行标记。标记的含义是：离到达anchor rule或者存在prefix有多远.
+
+# F函数
+
+# 考虑到CompCert中的方法，除了直接检测程序以外，还可以检测标记过的程序。这样，原来的checker就被分为了两个部分。一个是label的部分呢，将未标记的程序转化为标记后的程序。一个是检查label的部分，检查程序的label是否满足能够通过检查。
+# 对于labeler的部分，需要证明，标记前后的程序是等价的。
+# 对程序的标记工作是符合spec的:
+
+*** Interpreter
+To overcome the function totality restrain,
+the interpreter is implemented in a step-indexed way.
+For a given n, state will step n times, unless it gets
+a result in the middle.
+
+#+begin_src text
+Fixpoint interpr_step_main (n:nat) (st:State) : Rst :=
+  match n with
+  | 0 => unfinish
+  | S n' => let rst := interpr_step st in
+            match rst with
+            | state _ _ _ _ _ => interpr_step_main n' rst
+            | state_finished rtn => finished rtn
+            end
+  end.
+#+end_src
+# Also the program and 
+# 程序采用了使用coq来模拟了一个解释器。
+# 由于coq的fixpoint有很严格的限制，只能写coq认为具有totality的函数。
+# 所以解释其采用了step-indexed的方法，这样证明的内容就变为了：
+
+# xxxxxxxxxxxxxxxxx
+
+# 解释器采用small-step的方法，将整个程序，相关变量，包装成一个状态。
+# 每一步都是一个状态的transform。
+
+
+** Proof & Result
+From a top-to-down view, the proofs can be organized
+in the following way:
+
+Firstly, the ultimate goal is to proof:
+
+#+begin_src text
+Forall prog
+if (check program = true)   	
+then (exists n rtn, interpreter n program = FINISHED rtn) 
+#+end_src
+However, it is hard to directly proof this lemma.
+So, instead of proofing this lemma, we can also
+proof two similar lemmas that if combined those two,
+we can proof the ultimate goal in a classical logic easily.
+
+#+begin_src text
+Lemma interprMultiStepNSmaller :
+  forall st st' n,
+    checkState st = true ->
+    interpr_multi_step n st = st' ->
+    ((exists rtn, st' = state_finished rtn)
+      \/
+      (forall prog' dt' net' e' args', 
+       st' = (state prog' dt' net' e' args') -> 
+       F st' <= F st - n)).
+
+Lemma FzeroTerminate : forall st,
+    checkState st = true ->
+    F st = 0 -> (exists rtn, interpr_step st = state_finished rtn).
+#+end_src
+
+Here, the F function is a map from state to a natural number, which represents
+the maximum steps it need to terminate from this state. The number is caculated
+in this formula:
+
+#+begin_src text
+Fixpoint F (st:State) : nat :=
+  match st with
+  | (state prog dt net (exprl _ _ _ n) args) =>
+    (List.length prog) * (getNPrefix args) + n
+  | state_finished _ => 0
+  end.
+#+end_src
+
+Then, assume that forall n, interpr_multi_step n st does not terminate.
+let n = (F st), by interprMultiStepNSmaller, we know that F st' = 0,
+and by FzeroTerminate, we know that st' steps to a terminated state if F st' = 0, then 
+we have a contradiction. This proof need `excluded_middle` principle, 
+which is not included in constructive logic.
+
+To reason about the multi-step behavior, we need to proof
+some properties holds for single-step. The core lemma is
+to show that on each step, F st' is strictly less than F st,
+unless it terminates.
+
+#+begin_src text
+Lemma step_result : forall st prog dt net e args st',
+    checkState st = true ->
+    (st = state prog dt net e args) ->
+    (interpr_step st = st') ->
+    (
+      (exists rtn, st' = state_finished rtn)
+      \/
+      (forall prog' dt' net' e' args', st' = (state prog' dt' net' e' args') -> F st' <= F st - 1)
+    ).
+#+end_src
+
+Then, to proof this `step_result` lemma, we need to proof that 
+those arguments, which are used to calculate F value, are getting
+smaller that resulting in deduction of F value. So the lemma here is:
+
+#+begin_src text
+Lemma step_args_smaller :
+  forall st prog dt net e a st' p' d' n' e' a' rn mp act n2s
+  rn' mp' act' n2s',
+    checkState st = true ->
+    st = state prog dt net e a ->
+    st' = state p' d' n' e' a' ->
+    e = exprl rn mp act n2s ->
+    e' = exprl rn' mp' act' n2s' ->
+    interpr_step st = st' ->
+    ((n2s = 0 /\ (getNPrefix a' < getNPrefix a))
+     \/
+     (n2s' < n2s /\ (getNPrefix a' <= getNPrefix a))).
+#+end_src
+
+This is the longest proof in the whole project. Because we
+reason about state by its F value, to proof lemma, a common
+patter we used is to do a case analysis on all possible cases.
+Then we apply lemmas we gained from (checkState st = true) and lemmas of 
+`interpr_step` function. After we get all we want, use *omega* to 
+solve the equation automatically.
+
+From a bottom-up view, to help proof the above goals, 
+we extracted some lemmas from the implementation of interpr_step
+and checker.
+
+For the `interpr_step`, we proofed that
+
+1. Program stay the same after step: Lemma progUntouchedAfterStep
+2. If there is prefix in the paramaters of calling, after genArgs,
+   the prefix must shrink: Lemma `genArgs_lt_if_prefix`
+3. After genArgs, the prefix is less or equal to the previous: genArgs_le.
+
+1. Check-passed state implies that program and expression has passed the check: checkStateImply.
+2. If label *n* of state's expression is zero, then it must has getPrefix bahaviour or it is an anchor: checkExprImply1.
+3. The label *n* of state's expression is non-zero, it reflects its definition that the step count to next /prefix shrink/ : Lemma checkExprImplyRc and checkExprImplyOr
+4. The label *n* of state meet the specification: Lemma 
+   labeled_prog_args_shrink_rc and labeled_prog_args_shrink_or
+5. Program's length is longer than 0: Lemma progLengthLt0
+6. Each label *n* is less than program's length: labelLtProgLength.
+
+To summarize, except for Multi-Step-Smaller,
+which is apparently true if single-step-smaller holds,
+all important and major goals have 
+been successfully proofed. 
+To make it a theoretical perfect proof, 
+all the admitted trivial lemmas should be proofed. 
+
+* Lessons Learned
+** Journey of Proof
+Compared with original goal, the difference is that 
+the 'try..else' rule is removed in the project. 
+'try...else' and data encapsulating drastically
+make the proof more difficult, so it was removed at the time when
+I started to re-design the whole proof path. 
+Proof of the concrete implementation is much harder than I expected.
+One reason is that, there are some Coq proof skills which take
+a lot of time to figure out, like, 1. avoiding unfold at beginning, 
+because it will try to eagerly simplify the formula and 'eat' the
+term you want to keep, 2. use keyword Function instead of Fixpoint if there are '_' or unused variable in matching, otherwise simpl or unfold will not work as expected in proof.
+
+# 最初的实现是采用一个类似big-step的方法，即
+In the begining, the implementation used a recursive way like this:
+#+begin_src text
+Fixpoint f ....
+match..
+....some codes...
+.... (f args...)
+....some codes...
+end
+#+end_src
+
+However, proofing in this recursive implementation is difficult.
+Recall that our goal is to proof that 
+#+begin_src text
+forall prog, checked prog -> (exists n rtn, interpreter n prog env = Some rtn)
+#+end_src
+
+To proof this goal, one roadblock is that, for different data packets,
+you can not provide a specific /rtn/ beforehand. Also, it is impossible to perform
+a case analysis on the return value, because the induction hypothesis needed has
+the form that, 'down the way to the some point, there is a terminated state, and this
+state is no more than /n/ steps further', which seems like a customized induction hypothesis.
+However, the customized induction hypothesis might not be consistent with coq logic, and indeed
+it is not correct in this example. 
+
+It was the hardest part in the whole journey. But luckily, I came up an idea that I can map the
+state to a natural number, which indicates the maximum steps it will take to terminate from that
+state. Also, I found out that the formula F should can capture this. Then by labeling the expression
+and extract lemmas from label checker, finally, the goal is proofed.
+
+The important experience I learn is the answers to questions like:
++ what can be done
++ what can be done easily
++ what is hard or impossible to be done in coq
+
+
+# 首先，在这种模型下，n和rtn是无法举例的，对于不同的数据，rtn的值显然是不相同的，即使我们简化rtn，将程序改为标注是否终止，通过inductive来分析这个程序仍然存在一些困难。
+# 首先因为这个递归调用会在得到结果后返回，即使给出了n的上界，这个n对于获得有意义的
+# induction hypothesis并没有帮助：返回值是在某一个不确定的点获得的，而有意义的IH应该是
+# 需要说明，存在一个点，使得interpreter在执行程序时，程序会达到那个状态，同时那个状态是终止的。由于程序的之间的状态转移是未知的，所以不能通过inductive来说明这个问题。
+# 此外，因为程序本身是每次获取一个网络上的数据包，然后再进行分析，数据包的结构可能存在环路，这也是我们这个checker要防止的部分，所以数据不能简单地使用GADT来表示，因为在coq中gadt是不能指向自己的。
+
+# 这也是在编写可证明的实现的时候的一个经验，对于递归调用，如果不能够想出有效的，可证明的IH，则程序不可证明。这个时候可以考虑改用迭代的方法.
+
+# 同时，直接检测程序的部分，也同样使用了类似的方法，要从中导出一些性质其实也有一定的难度。
+
+# 于是，解决的办法分为两个部分，一部分是为程序增加更多的信息，另一部分则是loose证明和程序中的一些条件。
+
+** Type System
+
+One 'Aha moment' during this journey is when I was trying to use
+dependent type to proof, I suddenly found
+one more reason why we need type system. Back to last quater's 231,
+Professor Todd introduced Type-and-Effect systems. Todd gave
+an example of typing rules of a type system capturing exception
+catch and throw behaviours. At that time, one perplexing question 
+for me is that,
+that system just looks too simple: bookkeeping exception behaviors in
+type.
+If we want to analyze the exception behavior, why can't we just 
+perform a code analysis on the concrete codes?
+Now I think I have a clear answer.
+Indeed, exception behavior analysis can be done both in type system
+level and code level. But the upshot is that, it is easier and more reasonable to be done in type system. 
+Curry–Howard correspondence tells us that a type is a proposition 
+and a program is a proof. Putting information into type is like to
+extend the proposition. Then all existing logical rules can be applied
+on this proposition, to help to form a sound theory. However, analysis
+on specific codes are just like reasoning about a proof of proposition.
+Even if it is possible, it is hard to reason that the algorithm used is correct. 
+
+An intuitive idea is that, the more powerful the type system is,
+the more information compiers or analyzers could use.
+On the other hand, the more powerful type system is, the more
+coding restrictions there are for a programmer. 
+Type system is a linkage between program and logic. It enable
+compiers to rule out more errors, make IDE tools possible to 
+perform precise codes refactoring, and code complement.
+
+In daily programming works, nothing drives me to think about these
+questions. After design, implementation and unit-test, if everything
+is fine, codes are accepted. But in Coq, implementatin is the easy part,
+while proof is ten times harder. Back to the example of this project,
+putting information that only used in proof into types, like using dependent type, really makes proof easier, because more information
+can be extracted from the type.
+
+
+# 在这个过程中，一个比较重要的领悟就是对于类型系统和程序的关系有了进一步的认识。
+# 类型系统是在程序的具体执行独立的一套系统。在上学期上231的时候，学到了一个
+# 分析异常的方法，就是把抛出异常的条件放入类型系统，在类型上进行一定的标记。
+# 在那时候我其实不是很理解为什么要这样，因为在我看来，如果想要分析一个程序，
+# 如果是类似异常这样的部分，其实非常简单，直接分析代码不就行了？
+# 但是，如果考虑CH，那么类型是命题，程序是证明。将想要分析的信息放进类型中，
+# 是在扩展命题，那么对于扩展后的命题，我们仍然可以用最基本的命题域上的规则，
+# 比如推导，交，并等分析，并得到确定的结果。如果我们直接分析代码，那么则是分析
+# 证明的过程，而证明过程的分析的难度就大了很多了。
+
+# 所以其实可以得出这样的结论：
+# 类型系统越强大，编译器，checker,analyser能获得的信息就越多，
+# 同时编写程序的难度也越大。这也使我重新思考了type soundness的问题，
+# 为什么我们想要type soundness，它的性质的意义在哪里？
+
+# 这些问题的答案在日常的编程中很难得到结果，甚至很难有意识地去思考这些问题，
+# 因为日常编程的目的就是实现一个功能，
+# 只要功能看起来work了，那么这个实现就是好的了。但是，在使用Coq的过程中，实现只是次要的，
+# 关键是这个实现在接下来的证明中能否良好地工作。回到这个proj中的例子上来，
+# expr需要携带一些在执行中的没有意义的信息，这些信息只会在分析/证明中用到，那么
+# 很明显这些信息就是应该在类型中的信息了。Coq有dependent type，
+# 可以把任意的信息放到类型汇总，也使得它可以编写非常强的可被分析能力的程序。
+
+** Program Verification
+
+Program verification techniques does improve software quality. During
+the proofing, I found several bugs in the implementation. That implementation,
+before proof started, has passed the unit-tests I set up. 
+However, consider the countless hours spent on proofs, if I have spent
+the same amount of time on design or implementation, is it possible to rule out those bugs 
+in the begining? Maybe yes, maybe no. Nonetheless, examples like CompCert showed that
+program verification techniques are useful in some cases.
+In my opinion, in the software engineering, the suitable scenario to use program verification techniques
+should have following characteristic:
+Firstly, It must be the key part of the whole system. Otherwise, it is not worthy to be proofed.
+Secondly, it must have a reasonable specification.
+Since there will always be a informal translate between software demand and specifications,
+if the demand is hard to be expressed in a formal specification, or the translation drastically fuzz up
+the demand, even if it is proofed, it is meaningless.
+
+Also, even the essential complexity of verification in coq is in a same magnitude as it in software development,
+the accidental complexity of verification, at least in my experience, is much higher than it's in software.
+To make coq a more popular tool, besides getting more people to understanding functional programming,
+coq need richer libraries, especially in proof automation. One example is a more powerful inversion.
+Sometime I met a situation like this:
+
+#+begin_src text
+H1 : match x with
+     | constructor1 .. => false
+     | constructor2 .. => false
+     | constructor3 .. => if a =? b then true else false
+     end = true
+#+end_src
+
+Apparently, only x is constructed by constructor3 and a = b. If I can get all these information by inversion on H1,
+a lot of time can be saved.
+
+In the end of the day, I believe that program verification will become a 
+critical part of software development process,
+combined with current techniques like unit-test, improving software quality.
+Yes, it's just one of those things, but it definitely is the fanciest one.
+
+# non-trivial proof of checker
+
+# 软件工程没有银弹。在一开始听说了CompCert的传说，慕名想看看传说中的Coq如何让这样的奇迹发生。
+# 在完成这个proj的过程中，遭遇了非常多的困难，这些困难让我意识到，pv技术要在现实中应用，
+# 还有一条长路要走。
+
+# 论点1， pv技术对于提升软件质量是有意义的。在工程上，我可以想到包括证明关键部分，admit一些显而易见的部分，
+# 在纸上证明经典逻辑中非常容易证明的东西。同时，sasche那个paper中提出的方法，对于扩展pv的可用性，简化，从我这个用户的角度来看
+# ，也有很大的意义。
+# 一开始，以为Program verification听起来就很厉害，一定是非常好用的方法，
+
+# 但是实际使用上才发现，就目前来看，首先，证明一个实现非常耗时，很多时候需要
+# 修改实现来帮助证明。尽管大部分情况，修改实现，通常是decomposition，也帮助
+# 提升了程序的可读性。在证明程序的过程中，意外地发现了一些实现上的错误！(在证明程序之前，这些实现都是经过了一些test case的考验的).
+
+# 没有魔法”informal transformation of specification“
+# 决定了pv一定是用在定义比较清晰的地方那个。
+
+# CIC的局限性？再看看software foundation再思考这个问题。
+# 对于实际的工程，结合经典逻辑和Coq，将一些在经典逻辑中easy to proof的部分
+# 使用经典逻辑 paper proof，对于依赖的可以在CIC逻辑中证明的部分，使用coq求证.
+
+# every proof of existence is necessarily constructive.
+
+# 更强大的tactics从右到左的推理
+
+# unfold function 对于证明的影响
+
+# * requirement
+# Recap the problem and motivation. This part should be brief, since we've already heard about this.
+
+# Briefly describe your overall approach.  A small concrete example snippet or two would be very helpful.
+
+# Results. Describe what you have achieved.  What remains to be done to make this a full-fledged research result?
+
+# Lessons Learned. Reflect on the work you did, so you and I can learn from it.  How did your approach differ from what you originally proposed, and why?  What was more (or less) challenging than you expected?  What would you do differently next time?  What do you now see as the strengths/weaknesses of a tool like Coq, and what does that imply about possible research directions to pursue?
+
+# Code.  Please submit all of your Coq code along with some brief documentation so I can relatively easily play with it and understand what's going on.
